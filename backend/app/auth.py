@@ -38,7 +38,7 @@ def issue_login_link(db: Session, user: User, settings: Settings) -> dict:
     db.flush()
     return {
         "token": token,
-        "url": f"{settings.dashboard_origin}/login#token={token}",
+        "url": f"{settings.dashboard_url or settings.dashboard_origin + '/login'}#token={token}",
         "expires_at": expires_at,
     }
 

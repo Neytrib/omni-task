@@ -617,3 +617,32 @@ GitHub Actions/Pages configuration, Railway production builds/private routing, c
 - Skipped/blocked checks and reason; paid/public actions approved or unperformed:
 - Remaining limitations and next eligible stage:
 - Stage status and confirmation that work stopped at its boundary:
+
+## Managed hosting setup — 2026-09-30
+
+Status: **Implementation verified locally; cloud provisioning/configuration in progress. Not yet a working hosted application.** The owner authorized completing the one-repository Railway/Pages/Neon/Upstash setup, approved Railway CLI authentication, and personally upgraded Railway to Hobby. Source inspection and existing behavior were preserved; no application feature or schema migration was added.
+
+### Changes and checks actually executed
+
+| Check | Observed result |
+| --- | --- |
+| `npm --prefix frontend test -- --reporter=dot` | 172 passed, including hosted URLs/base, blocked-cookie handling and safe public build settings. |
+| `npm --prefix frontend run typecheck`; local and synthetic Pages `npm run build` | Passed. `/omni-task/` assets, exact HTTPS/WSS CSP and no-referrer inspected; unapproved VITE sentinel excluded; missing API Pages build correctly rejected. Local output restored. |
+| `DOCKER_CONFIG=.../tmp/s7-docker-config DOCKER_HOST=unix:///Users/neytrib/.docker/run/docker.sock python3 scripts/test_backend.py -q` | 452 passed in 64.75s with isolated PostgreSQL, real Redis and separate worker processes. Initial test-context failure (missing Dockerfile) fixed and complete suite rerun. Existing user data untouched. |
+| Rebuilt Docker test image, focused `tests/test_railway_bot_deploy.py` | 40 passed, after those tests were added. Fake CLI only: no real bot restarted. |
+| `.venv/bin/pytest -q tests/test_hosting_setup.py tests/test_publication_boundaries.py tests/test_submission.py tests/test_railway_bot_deploy.py` | 56 passed, exit 0. Existing Starlette/httpx deprecation warning remains. |
+| `npm ci --prefix .railway --ignore-scripts`; `npm --prefix .railway run check`; `npm --prefix .railway test` | Locked SDK install/type checking passed; 4 configuration contract tests passed. |
+| Build `deploy/railway/backend.Dockerfile` and `deploy/railway/bot.Dockerfile` | Both passed. Actual Linux container checks confirmed UID 10001, IPv4/IPv6 listening, and no database/Redis/Celery/backend modules in bot image. |
+| Ruff checks/format checks and `git diff --check` | Passed for changed Python/source. |
+| `python3 scripts/configure_hosting.py` | Created three ignored files, directory mode 700/files 600, shared generated internal credential; no local `.env` copied. A Python 3.9 incompatibility in the new helper was corrected before successful execution and regression tests. |
+| Railway CLI `whoami`, project/service creation, status, sanitized plan and account checks | Authentication succeeded. Created empty `omni-task` project and API/bot/worker shells. Account verified Hobby. IaC plan succeeded; not applied while database/provider setup is incomplete. |
+| GitHub Pages API and repository variable setup | Enabled workflow-based Pages on the existing repository and set its public API origin. Workflow has not yet run at this checkpoint. |
+| Arc account/setup inspection | Confirmed Railway Hobby and existing new Neon `omni-task` Free project in Ohio. Native input was intermittent; user-assisted account/credential entry required. No hosted UI acceptance claimed. |
+
+Cloud project: `06507807-7826-4081-beef-a493a2fd73e4`; production environment `1117bb4b-3bcc-4b93-bcf1-e87718dd55b0`. API domain reserved: `https://api-production-08eb2.up.railway.app`; it is not a healthy deployed API yet. API internal credential was sent through CLI stdin with deployment disabled, never printed. Bot and worker have no public domain. No polling token or OpenAI key was transferred; local services/settings remain unchanged. No independent paid transcription was run.
+
+Neon follow-up: the owner supplied the connection string only in the ignored private API file. Its direct endpoint was verified with a real TLS connection: PostgreSQL 18.6, zero public tables. The verified URL was saved to the private API/worker files without printing it. No migration or user-data copy has run yet.
+
+### Remaining acceptance / continuation
+
+Complete private Upstash credentials and bot/worker external key placeholders, verify TLS connectivity and resource quotas, run one explicit migration, review/apply IaC and source connections, stop local polling before starting the same token in Railway, configure the scoped Actions deployment secret and verify workflows. Then use the exact Arc walkthrough in `docs/HOSTING_PLAN.md`: fresh `/profile` login/token removal/reload, two live tabs, Telegram text/status, complete content/deletion, disconnect/reconnect, logout/expiry/reuse and second-user isolation. Voice testing requires the owner's deliberate paid setting. Managed restore and provider-specific worker redelivery remain unverified; passing local tests is not evidence that those cloud checks passed. Do not claim exactly-once notification delivery or indefinitely free hosting.

@@ -4,6 +4,9 @@
 *.env.*
 !/.env.example
 !/production.env.example
+!/deploy/railway/api.env.example
+!/deploy/railway/bot.env.example
+!/deploy/railway/worker.env.example
 *.[pP][eE][mM]
 *.[kK][eE][yY]
 *.[pP]12

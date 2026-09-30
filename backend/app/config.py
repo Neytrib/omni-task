@@ -4,6 +4,8 @@ from urllib.parse import urlsplit
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.redis_config import normalize_redis_url
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
@@ -13,11 +15,14 @@ class Settings(BaseSettings):
     bot_api_key: SecretStr
     bot_identity: str = Field(default="omni-task", min_length=1, max_length=100)
     dashboard_origin: str = "http://127.0.0.1:8080"
+    dashboard_url: str | None = Field(default=None, max_length=2048)
     app_env: Literal["development", "production", "test"] = "development"
     cookie_secure: bool = False
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    cookie_partitioned: bool = False
     session_ttl_seconds: int = Field(default=604800, ge=60, le=2592000)
     login_ttl_seconds: int = Field(default=300, ge=1, le=900)
-    cookie_name: str = "omni_session"
+    cookie_name: str = Field(default="omni_session", pattern=r"^[A-Za-z0-9_-]{1,100}$")
     bot_base_url: str = "http://bot:8001"
     voice_dispatch_enabled: bool = True
     live_enabled: bool = True
@@ -49,12 +54,16 @@ class Settings(BaseSettings):
     def empty_openai_key(cls, value):
         return None if value == "" else value
 
+    @field_validator("dashboard_url", mode="before")
+    @classmethod
+    def empty_dashboard_url(cls, value):
+        return None if value == "" else value
+
     @model_validator(mode="after")
     def validate_security(self):
         if not self.database_url.startswith("postgresql+psycopg://"):
             raise ValueError("DATABASE_URL must use PostgreSQL with psycopg")
-        if not self.redis_url.startswith(("redis://", "rediss://")):
-            raise ValueError("REDIS_URL must use Redis")
+        self.redis_url = normalize_redis_url(self.redis_url)
         if len(self.bot_api_key.get_secret_value()) < 32:
             raise ValueError("BOT_API_KEY must have at least 32 characters")
         origin = urlsplit(self.dashboard_origin)
@@ -78,9 +87,22 @@ class Settings(BaseSettings):
             or origin.path not in {"", "/"}
             or origin.query
             or origin.fragment
+            or any(char.isspace() or char == "\\" for char in self.dashboard_origin)
         ):
             raise ValueError("DASHBOARD_ORIGIN must be an HTTP(S) origin")
         self.dashboard_origin = self.dashboard_origin.rstrip("/")
+        if self.dashboard_url is not None:
+            dashboard = urlsplit(self.dashboard_url)
+            if (
+                dashboard.scheme != origin.scheme
+                or dashboard.netloc != origin.netloc
+                or dashboard.query
+                or dashboard.fragment
+                or any(char.isspace() or char == "\\" for char in self.dashboard_url)
+            ):
+                raise ValueError(
+                    "DASHBOARD_URL must be a path URL on DASHBOARD_ORIGIN without query or fragment"
+                )
         if self.app_env == "production" and (not self.cookie_secure or origin.scheme != "https"):
             raise ValueError("Production requires HTTPS and secure cookies")
         if (
@@ -89,4 +111,10 @@ class Settings(BaseSettings):
             and origin.hostname not in {"localhost", "127.0.0.1", "::1"}
         ):
             raise ValueError("Insecure cookies are allowed only for loopback development")
+        if self.cookie_samesite == "none" and (not self.cookie_secure or origin.scheme != "https"):
+            raise ValueError("SameSite=None requires secure cookies and an HTTPS dashboard")
+        if self.cookie_partitioned and self.cookie_samesite != "none":
+            raise ValueError("Partitioned cookies require SameSite=None")
+        if self.cookie_name.startswith(("__Host-", "__Secure-")) and not self.cookie_secure:
+            raise ValueError("Prefixed session cookies require COOKIE_SECURE=true")
         return self

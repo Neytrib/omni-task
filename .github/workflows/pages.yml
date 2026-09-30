@@ -1,0 +1,104 @@
+name: Frontend · GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Railway deploys API/worker directly; railway-bot.yml serializes bot releases.
+# This workflow never commits generated files or triggers a second workflow.
+permissions: {}
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: read
+    outputs:
+      configured: ${{ steps.configuration.outputs.configured }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install locked frontend dependencies
+        run: npm ci
+
+      - name: Run deterministic frontend tests
+        run: npm test
+
+      - name: Check TypeScript
+        run: npm run typecheck
+
+      - name: Check public deployment configuration
+        id: configuration
+        env:
+          PUBLIC_API_ORIGIN: ${{ vars.PUBLIC_API_ORIGIN }}
+        shell: bash
+        run: |
+          if [[ -z "${PUBLIC_API_ORIGIN//[[:space:]]/}" ]]; then
+            printf 'configured=false\n' >> "$GITHUB_OUTPUT"
+            printf '::notice::Pages deployment is not configured. Add the PUBLIC_API_ORIGIN repository variable with your Railway API HTTPS origin, then run this workflow again.\n'
+            printf '## Pages deployment not configured\n\nFrontend checks and the local production build still run. To publish, set the **PUBLIC_API_ORIGIN** repository variable to the Railway API HTTPS origin, enable GitHub Pages with **GitHub Actions** as its source, and rerun this workflow. **PUBLIC_WS_ORIGIN** is optional; it must use the API hostname. Use public URLs only, never credentials.\n' >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf 'configured=true\n' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify local production build while deployment is unconfigured
+        if: steps.configuration.outputs.configured != 'true'
+        run: npm run build
+
+      - name: Build the GitHub Pages frontend
+        if: steps.configuration.outputs.configured == 'true'
+        env:
+          # Public build values only. All provider/database/auth secrets stay in Railway.
+          VITE_API_ORIGIN: ${{ vars.PUBLIC_API_ORIGIN }}
+          VITE_WS_ORIGIN: ${{ vars.PUBLIC_WS_ORIGIN }}
+          VITE_BASE_PATH: /omni-task/
+        run: npm run build
+
+      - name: Configure GitHub Pages
+        if: steps.configuration.outputs.configured == 'true'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload compiled frontend only
+        if: steps.configuration.outputs.configured == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: frontend/dist
+          include-hidden-files: false
+          retention-days: 1
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && needs.build.outputs.configured == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy frontend to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

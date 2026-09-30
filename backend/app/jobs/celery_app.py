@@ -7,6 +7,7 @@ from uuid import UUID
 from celery import Celery
 from celery.signals import setup_logging
 
+from app.redis_config import normalize_redis_url
 from omni_logging import configure_logging
 
 
@@ -15,7 +16,7 @@ def setup_worker_logging(**_):
     configure_logging("worker")
 
 
-redis_url = os.environ["REDIS_URL"]
+redis_url = normalize_redis_url(os.environ["REDIS_URL"])
 celery_app = Celery(
     "omni_task", broker=redis_url, backend=redis_url, include=["app.jobs.voice_tasks"]
 )
@@ -29,6 +30,11 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
+    broker_connection_max_retries=10,
+    broker_pool_limit=4,
+    redis_max_connections=8,
+    redis_socket_connect_timeout=2,
+    redis_socket_timeout=2,
     broker_transport_options={
         "visibility_timeout": 600,
         "socket_connect_timeout": 2,

@@ -3,6 +3,7 @@ import { DragDropProvider, useDraggable, useDroppable } from '@dnd-kit/react';
 import type { DragEndEvent } from '@dnd-kit/react';
 import { Feedback, PointerSensor } from '@dnd-kit/dom';
 import type { AuthResult, Session } from './auth';
+import { apiFetch } from './transport';
 import { useTasks } from './useTasks';
 import { taskPointerSensor } from './cardDrag';
 import { useBoardMotion } from './boardMotion';
@@ -166,7 +167,7 @@ export function App({ authentication }: { authentication: Promise<AuthResult> })
     if (auth.state !== 'signed-in' || busy) return;
     setBusy(true); setLogoutError('');
     try {
-      const response = await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': auth.session.csrf_token } });
+      const response = await apiFetch('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': auth.session.csrf_token } });
       if (!response.ok && response.status !== 401) throw new Error('Logout failed');
       setAuth({ state: 'signed-out', message: 'Signed out. Send /profile to your Telegram bot to return with a fresh private link.' });
     } catch { setLogoutError('Could not sign out. Check your connection and try again.'); }

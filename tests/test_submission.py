@@ -82,6 +82,53 @@ def test_submission_detects_key_patterns_without_reading_private_env(tmp_path):
         collect_sources(root)
 
 
+def test_submission_includes_only_explicit_hosted_configs_and_workflows(tmp_path):
+    root = source_tree(tmp_path)
+    public = {
+        ".railway/railway.ts",
+        ".railway/package.json",
+        ".railway/package-lock.json",
+        ".railway/tsconfig.json",
+        ".railway/config.test.mjs",
+        ".railway/README.md",
+        ".github/workflows/pages.yml",
+        "deploy/railway/backend.Dockerfile",
+        "deploy/railway/bot.Dockerfile",
+        "deploy/railway/api.env.example",
+        "deploy/railway/bot.env.example",
+        "deploy/railway/worker.env.example",
+    }
+    private = {
+        ".railway/session.json",
+        ".railway/node_modules/railway/index.js",
+        ".github/credentials.json",
+        ".github/workflows/settings.env",
+        "private/railway/api.env",
+        "deploy/railway/api.env",
+        "deploy/railway/unknown.env.example",
+        "backend/private/credentials.json",
+        "backend/confidential/source.txt",
+    }
+    for name in public | private:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("Synthetic config\n")
+    sources = collect_sources(root)
+    assert public <= sources.keys()
+    assert not private & sources.keys()
+
+
+def test_submission_detects_credentials_from_private_hosted_configuration(tmp_path):
+    root = source_tree(tmp_path)
+    credentials = root / "private/railway/api.env"
+    credentials.parent.mkdir(parents=True)
+    secret = "rediss://default:synthetic-private-value@redis.example.invalid:6379/0"
+    credentials.write_text("REDIS_URL=" + secret)
+    (root / "frontend/src/leak.ts").write_text(secret)
+    with pytest.raises(ValueError, match="Potential credential"):
+        collect_sources(root)
+
+
 def test_production_configuration_generates_distinct_secrets_without_enabling_external_calls():
     first = configuration("tasks.example.com", "admin@example.com", "release-1")
     second = configuration("tasks.example.com", "admin@example.com", "release-1")

@@ -1,3 +1,6 @@
+import { PublicConfigurationError } from '../publicConfig';
+import { apiFetch } from './transport';
+
 export type Session = { csrf_token: string; expires_at: string };
 export type AuthResult =
   | { state: 'signed-in'; session: Session }
@@ -17,8 +20,8 @@ export function bootstrapAuth(): Promise<AuthResult> {
   return (async () => {
     try {
       if (token) {
-        const exchange = await fetch('/api/auth/exchange', {
-          method: 'POST', credentials: 'same-origin',
+        const exchange = await apiFetch('/api/auth/exchange', {
+          method: 'POST', cache: 'no-store',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token }),
         });
@@ -29,11 +32,14 @@ export function bootstrapAuth(): Promise<AuthResult> {
           return { state: 'signed-out', message: `This login link is invalid or expired, or has already been used. ${freshLink}` };
         }
       }
-      const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store' });
-      if (response.status === 401) return { state: 'signed-out', message: freshLink };
+      const response = await apiFetch('/api/session', { cache: 'no-store' });
+      if (response.status === 401) return { state: 'signed-out', message: token
+        ? 'Your link was accepted, but the browser could not keep your session. It may block or not support this private cookie, or the session may have expired. Update your browser, then request a fresh /profile link in Telegram.'
+        : freshLink };
       if (!response.ok) return { state: 'error', message: 'The service is unavailable. Please try again.' };
       return { state: 'signed-in', session: await response.json() as Session };
-    } catch {
+    } catch (error) {
+      if (error instanceof PublicConfigurationError) return { state: 'error', message: `Dashboard configuration needs attention. ${error.message}` };
       return { state: 'error', message: 'Connection failed. Reload, or open a fresh login link.' };
     }
   })();

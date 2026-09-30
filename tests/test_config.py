@@ -44,6 +44,69 @@ def test_insecure_development_cookie_requires_loopback():
     ).cookie_secure
 
 
+def test_local_browser_configuration_remains_same_origin():
+    settings = configuration()
+    assert settings.dashboard_url is None
+    assert settings.cookie_samesite == "lax"
+    assert not settings.cookie_partitioned
+    assert settings.cookie_name == "omni_session"
+    assert configuration(dashboard_url="").dashboard_url is None
+
+
+def test_hosted_browser_configuration_accepts_secure_partitioned_cookie():
+    settings = configuration(
+        app_env="production",
+        dashboard_origin="https://pages.example/",
+        dashboard_url="https://pages.example/project/",
+        cookie_secure=True,
+        cookie_samesite="none",
+        cookie_partitioned=True,
+        cookie_name="__Host-omni_session",
+    )
+    assert settings.dashboard_origin == "https://pages.example"
+    assert settings.dashboard_url == "https://pages.example/project/"
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"cookie_samesite": "none", "cookie_secure": False},
+        {"cookie_samesite": "none", "cookie_secure": True, "dashboard_origin": "http://localhost"},
+        {"cookie_partitioned": True},
+        {"cookie_partitioned": True, "cookie_samesite": "strict", "cookie_secure": True},
+        {"cookie_name": "__Host-omni_session", "cookie_secure": False},
+        {"cookie_name": "__Secure-omni_session", "cookie_secure": False},
+        {"cookie_name": "session;unsafe"},
+        {"cookie_name": "session\r\nother"},
+        {"cookie_name": ""},
+    ],
+)
+def test_unsafe_cookie_configurations_fail_closed(changes):
+    with pytest.raises(ValidationError):
+        configuration(**{"dashboard_origin": "https://pages.example", **changes})
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://other.example/project/",
+        "http://pages.example/project/",
+        "//pages.example/project/",
+        "https://pages.example:444/project/",
+        "https://user:secret@pages.example/project/",
+        "https://pages.example/project/?token=synthetic",
+        "https://pages.example/project/#token=synthetic",
+        "https://pages.example\\attacker.example/project/",
+        "https://pages.example/\nproject/",
+    ],
+)
+def test_dashboard_link_must_use_configured_origin_without_credentials_or_token(url):
+    with pytest.raises(ValidationError):
+        configuration(
+            dashboard_origin="https://pages.example", cookie_secure=True, dashboard_url=url
+        )
+
+
 @pytest.mark.parametrize(
     "content,expected",
     [

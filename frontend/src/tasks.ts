@@ -1,4 +1,5 @@
 import type { Session } from './auth';
+import { apiFetch } from './transport';
 
 export const statuses = ['pending', 'in_progress', 'completed'] as const;
 export type TaskStatus = typeof statuses[number];
@@ -68,8 +69,8 @@ export async function taskRequest<T>(
     if (options.body) headers.set('Content-Type', 'application/json');
   }
   try {
-    const response = await fetch(path, {
-      ...options, headers, credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
+    const response = await apiFetch(path, {
+      ...options, headers, cache: 'no-store', signal: controller.signal,
     });
     if (!response.ok) {
       const body = await response.json().catch(() => null) as { error?: { code?: string } } | null;

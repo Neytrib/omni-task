@@ -28,11 +28,13 @@ CMD ["uvicorn", "bot.app.main:app", "--host", "0.0.0.0", "--port", "8001", "--no
 
 FROM backend AS test
 USER root
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 RUN uv sync --locked --no-default-groups --group backend --group bot --group dev --no-install-project
 COPY tests ./tests
 COPY bot ./bot
-COPY docker-compose.yml compose.production.yml .dockerignore .env.example production.env.example ./
+COPY Dockerfile docker-compose.yml compose.production.yml .gitignore .dockerignore .env.example production.env.example ./
 COPY deploy ./deploy
+COPY .github/workflows ./.github/workflows
 ENV PYTHONPATH=/app/backend:/app
 USER app
 CMD ["pytest", "-q"]

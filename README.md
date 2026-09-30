@@ -4,9 +4,32 @@ A private Telegram-linked task manager with long-polling text and voice capture,
 
 The assessment requirements and additional product choices are separated in [SPEC.md](SPEC.md). Stage evidence and limitations are in [TASKS.md](TASKS.md).
 
-Submission reading order: [requirements and test checklist](docs/REQUIREMENTS.md), [plain-English interview walkthrough](docs/ARCHITECTURE_WALKTHROUGH.md), and [three-minute demonstration](docs/DEMO.md). Operations: [Ubuntu VPS deployment/update/rollback runbook](docs/DEPLOYMENT.md) and [backup/restore procedure](docs/BACKUP_RESTORE.md). Production preparation adds an HTTPS edge; it does not authorize public deployment.
+Submission reading order: [requirements and test checklist](docs/REQUIREMENTS.md), [plain-English interview walkthrough](docs/ARCHITECTURE_WALKTHROUGH.md), and [three-minute demonstration](docs/DEMO.md). Operations: [managed-hosting setup](docs/HOSTING_PLAN.md), the retained [Ubuntu VPS runbook](docs/DEPLOYMENT.md), and [backup/restore procedure](docs/BACKUP_RESTORE.md).
 
-The public source repository is [Neytrib/omni-task](https://github.com/Neytrib/omni-task). The selected [Railway, GitHub Pages, Neon and Upstash hosting plan](docs/HOSTING_PLAN.md) still requires hosting-specific implementation; the cloud application is not deployed. Local Compose and the existing Ubuntu runbook remain available.
+The complete source is in one public repository: [Neytrib/omni-task](https://github.com/Neytrib/omni-task). Managed-hosting code now targets Railway API/bot/worker, GitHub Pages frontend, Neon PostgreSQL and Upstash Redis. **The cloud application is not deployed or accepted yet:** provider credentials, initial migration and live Arc checks remain. Local Compose still works independently.
+
+## Managed hosting
+
+Create protected variable files, then fill the private copies:
+
+```sh
+python3 scripts/configure_hosting.py
+```
+
+The files are `private/railway/api.env`, `bot.env` and `worker.env`. The helper generates matching service credentials, preserves existing files, never reads local `.env`, and keeps all three ignored and mode 0600. Copy them to each Railway service's protected Variables editor. PostgreSQL/Redis credentials go only to API/worker, the Telegram token only to bot, and the OpenAI key only to worker. Paid transcription is off in these new templates; existing local settings are unchanged.
+
+The [hosting runbook](docs/HOSTING_PLAN.md) gives the exact setup, controlled migration, update and rollback steps. The owner upgraded Railway to Hobby; three empty service shells, an API domain and GitHub Pages configuration now exist. Neon was created, but its private connection details and Upstash setup are still required. The intended frontend address is `https://neytrib.github.io/omni-task/`, not a verified live URL. Assigned domain `https://api-production-08eb2.up.railway.app` does not yet have a deployed API.
+
+| Deployment path | Configuration |
+| --- | --- |
+| Railway API and worker | GitHub `main` sources defined in [.railway/railway.ts](.railway/railway.ts), current locked Railway SDK |
+| Railway bot | [Serialized stop-before-start workflow](.github/workflows/railway-bot.yml); no competing native bot autodeploy |
+| GitHub Pages | [.github/workflows/pages.yml](.github/workflows/pages.yml), compiled `frontend/dist` only |
+| Pages public variables | `PUBLIC_API_ORIGIN` = Railway HTTPS origin; optional `PUBLIC_WS_ORIGIN` = WSS on the same API hostname |
+
+Pages uses `npm ci`, tests, type checking and `npm run build` inside `frontend/`, with `/omni-task/` as its production base. No API/provider secret belongs in any `VITE_*` or public repository variable. Without `PUBLIC_API_ORIGIN`, checks run but deployment is skipped with an explanatory summary. API/worker deploy from source; bot replacement is serialized to prevent two pollers sharing a token. Before moving your current token, run `docker compose stop bot`; use a separate development token afterward. Once accepted, the hosted system does not require your computer online.
+
+Browser sessions use secure partitioned HttpOnly cookies across Pages and Railway, with exact CORS/Origin checks and CSRF protection. Actual Arc cookie/WSS acceptance remains required; unsupported or blocked cookies produce an explicit login failure. No second repository, Cloudflare Pages or browser-stored permanent credential is used.
 
 ## Local setup
 
@@ -38,7 +61,7 @@ docker compose down
 
 Start again with `docker compose up -d --wait`. PostgreSQL and Redis named volumes remain. **Do not add `--volumes`/`-v` to routine shutdown:** that explicitly deletes stored data. No reset is performed automatically.
 
-## Service boundaries and migrations
+## Local service boundaries and migrations
 
 | Service | Purpose | Network access |
 | --- | --- | --- |
@@ -112,7 +135,7 @@ The frontend build includes TypeScript checking and needs no downloaded browser.
 
 ## Configuration reference
 
-The local placeholder template is [.env.example](.env.example). The production template is [production.env.example](production.env.example); use `scripts/configure_production.py` as shown in the deployment runbook to generate protected secrets without printing them. Leave real credentials out of every example, archive and image.
+The local placeholder template is [.env.example](.env.example). The VPS template is [production.env.example](production.env.example); use `scripts/configure_production.py` as shown in the VPS runbook. Managed hosting uses the separate [Railway templates](deploy/railway) and `scripts/configure_hosting.py`. Leave real credentials out of every public example, archive and image.
 
 | Variable | Local default / placeholder | Production behavior |
 | --- | --- | --- |
@@ -121,8 +144,10 @@ The local placeholder template is [.env.example](.env.example). The production t
 | `BOT_API_KEY` | Random server-only secret | At least 32 characters; shared by API/bot/worker, never browser code. |
 | `BOT_IDENTITY` | `omni-task-local` | Set a stable namespace for the chosen bot; do not change during token rotation. |
 | `TELEGRAM_BOT_TOKEN` | Blank: polling disabled | Enter privately; only one polling process per token. |
-| `APP_ENV`, `COOKIE_SECURE` | `development`, `false` for loopback HTTP | Override forces `production`, `true`. |
-| `DASHBOARD_ORIGIN` | `http://127.0.0.1:8080` | Override derives exact `https://DOMAIN`. |
+| `APP_ENV`, `COOKIE_SECURE` | `development`, `false` for loopback HTTP | Production uses `production`, `true`. |
+| `DASHBOARD_ORIGIN` | `http://127.0.0.1:8080` | Pages: `https://neytrib.github.io`; VPS: exact `https://DOMAIN`. |
+| `DASHBOARD_URL` | Unset: existing origin plus `/login` | Pages: `https://neytrib.github.io/omni-task/`; separate from the browser origin. |
+| `COOKIE_NAME`, `COOKIE_SAMESITE`, `COOKIE_PARTITIONED` | `omni_session`, `lax`, `false` | Pages: `__Host-omni_session`, `none`, `true`, together with Secure. |
 | `SESSION_TTL_SECONDS`, `LOGIN_TTL_SECONDS` | `604800`, `300` | Absolute session and single-use login-link lifetimes. |
 | `LIVE_CHANNEL` | `omni-task:live:v1` | Unique per deployment; Pub/Sub spans Redis DB numbers. |
 | `TRANSCRIPTION_PROVIDER` | `disabled` | `disabled`, explicitly labeled `fake`, or deliberately enabled `openai`. |
@@ -133,20 +158,19 @@ The local placeholder template is [.env.example](.env.example). The production t
 | `COMPOSE_PROJECT_NAME`, `RELEASE_TAG` | Local project `omni-task`, image tag `local` | Production project `omni-task-prod`; unique immutable tag per release. |
 | `DOMAIN`, `ACME_EMAIL` | Not used locally | Public hostname and certificate-contact email; no scheme/path in DOMAIN. |
 
-Compose supplies internal `DATABASE_URL`, `REDIS_URL`, `BOT_BASE_URL`, and bot `API_BASE_URL`; do not expose or manually copy these into frontend configuration. Local and server credentials must be independent. The server-side env file is readable to host root/Docker administrators; no secrets vault is claimed.
+Compose supplies internal `DATABASE_URL`, `REDIS_URL`, `BOT_BASE_URL`, and bot `API_BASE_URL`. Managed hosting instead uses Neon direct PostgreSQL with TLS, native Upstash `rediss://` with certificate/hostname verification, and Railway private service references; see the hosting runbook. Never copy these into frontend configuration. Local and server credentials are independent. Protected variables remain accessible to authorized hosting administrators; no separate secrets vault is claimed.
 
 ## Architecture and message flows
 
-The bot, API, worker, frontend, PostgreSQL, and Redis are separate services. API and worker share persistence/business logic; the bot uses authenticated HTTP only. The production edge terminates HTTPS in front of the same built frontend/API/WebSocket origin.
+The bot, API, worker, frontend, PostgreSQL, and Redis are separate services. API and worker share persistence/business logic; the bot uses authenticated HTTP only. Managed hosting serves the static frontend from Pages and HTTPS/WSS from Railway. The retained Compose/VPS deployment instead uses an nginx frontend proxy and optional HTTPS edge on one origin.
 
 ```mermaid
 flowchart LR
     TG[Private Telegram chat] <--> Bot[Long-polling bot]
     Bot -->|Authenticated HTTP| API[FastAPI]
-    Browser[React board] <-->|HTTPS and WebSocket| Edge[Production HTTPS edge + frontend]
-    Edge <--> API
-    API <--> DB[(PostgreSQL)]
-    API -->|Durable job dispatch| Redis[(Redis queues + Pub/Sub)]
+    Pages[GitHub Pages React board] <-->|HTTPS and WSS| API
+    API <--> DB[(Neon PostgreSQL)]
+    API -->|Durable job dispatch| Redis[(Upstash queues + Pub/Sub)]
     Redis --> Worker[Transcription and notification consumers]
     Worker <--> DB
     Worker -->|Download or acknowledgement edit| Bot
@@ -164,7 +188,7 @@ flowchart LR
 
 Internal `/internal/bot/*` calls require `Authorization: Bearer <BOT_API_KEY>`. The API authenticates that service credential before resolving Telegram identity. Browser sessions cannot authorize internal operations, and the browser proxy strips service authorization headers. Telegram users are resolved from verified bot requests; a browser cannot select its task owner.
 
-Login links contain a random token in the URL fragment. Only `POST /api/auth/exchange` consumes it; a GET is harmless. Exchange requires the exact configured `Origin` and returns an opaque HttpOnly, host-only, SameSite=Lax cookie. Production requires Secure cookies. Only token/session hashes are stored in PostgreSQL. Session reads return a CSRF token, which authenticated mutations send in `X-CSRF-Token` together with the exact Origin. Logout revokes the current session; expired and revoked sessions fail authentication. The login page removes the fragment before sending a single exchange POST, including under React StrictMode. There is no registration form, manually entered login code, or permanent browser localStorage credential.
+Login links contain a random token in the URL fragment. Only `POST /api/auth/exchange` consumes it; a GET is harmless. Exchange requires the exact configured `Origin` and returns an opaque HttpOnly, host-only cookie. Same-origin Compose/VPS uses SameSite=Lax; Pages/Railway uses Secure, SameSite=None, Partitioned cookies and credentialed CORS. Only token/session hashes are stored in PostgreSQL. Session reads return a CSRF token, which authenticated mutations send in `X-CSRF-Token` together with the exact Origin. Logout revokes the current session; expired and revoked sessions fail authentication. The page removes the fragment before a single exchange POST, including under React StrictMode, then verifies the browser session through a GET. There is no registration form, manually entered login code or permanent browser localStorage credential. Real cross-site cookie/WSS browser acceptance remains outstanding.
 
 Tasks accept complete text up to the explicit 50,000-code-point limit. Whitespace-only and oversized inputs fail validation; accepted text, whitespace, Unicode, and line breaks are preserved exactly. Titles are deterministic display strings, at most 80 code points. Status values are `pending`, `in_progress`, and `completed`. Source receipts enforce duplicate delivery in PostgreSQL and survive task deletion without its content. Processing requests have their own state, separate from task status. Failed transcription never creates a task.
 
@@ -346,7 +370,7 @@ The S9 complete regression run on 2026-09-30 reported **382 backend tests passed
 
 Private Telegram chats and single-user ownership only. One message creates one task; titles are deterministic and full accepted content remains unchanged. No teams, roles, billing, priorities, due dates, RAG, content rewriting, multi-task extraction, or automatic refresh of old Telegram messages. The supported operations are creation, viewing, status changes and confirmed deletion. No offline write queue or manual within-column ordering.
 
-This is a single-VPS application, with maintenance downtime and no high-availability promise. Public DNS/ACME/firewall operation and load capacity remain to be verified on the approved server. Complete phone/light-theme/zoom/pointer-drag visual checks remain outstanding; earlier Arc desktop checks are described above. An external timeout/crash can repeat a provider call or Telegram send: exactly-once external notifications and billing are not guaranteed. The current provider model has a published retirement date; keep its configuration and contract under review. One existing Starlette TestClient/httpx deprecation warning is documented in test results.
+Managed hosting is prepared but awaits provider configuration and acceptance. It has one API/bot/worker replica, brief bot update downtime and no high-availability promise. Continuous database dispatch queries can prevent Neon from sleeping; Celery also consumes Redis commands while idle, so review free/trial budgets. Provider quotas, actual partitioned-cookie/WSS behavior and managed backup/restore remain unverified. All `neytrib.github.io` projects share an origin and must be treated as trusted code. Pages cannot set custom response headers such as CSP `frame-ancestors`; its static meta CSP restricts scripts/styles/connections but cannot provide that frame protection. The alternative VPS setup still needs real public DNS/ACME/firewall verification. Complete phone/light-theme/zoom/pointer-drag visual checks remain outstanding; earlier Arc desktop checks are described above. External timeouts/crashes can repeat provider calls or Telegram sends: exactly-once external delivery and billing are not guaranteed. Keep the configurable provider model under review. One existing Starlette TestClient/httpx deprecation warning is documented in test results.
 
 ## AI assistance disclosure
 
@@ -354,4 +378,4 @@ This project was developed with substantial OpenAI Codex assistance. Codex helpe
 
 ## Current boundary
 
-S9 prepares the source submission and one-Ubuntu-VPS deployment/restore workflow. No VPS was purchased, no public deployment or independent paid transcription was performed, and existing development credentials/data were preserved. Follow the final checklist in docs/REQUIREMENTS.md and the remaining issues in TASKS.md before submission or an approved deployment. Stop after this preparation stage.
+Public source publication is complete. The owner authorized managed-hosting setup using one repository, Railway, Pages, Neon and Upstash, and upgraded Railway to Hobby. Implementation, protected variable placeholders, service shells and public endpoint configuration are prepared. The cloud application is not yet running: provider credentials, controlled first migration and live acceptance remain. No independent paid transcription test has been performed, and existing local credentials/data are preserved. [The hosting runbook](docs/HOSTING_PLAN.md) and [TASKS.md](TASKS.md) distinguish implemented configuration from executed deployment checks.

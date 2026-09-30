@@ -1,64 +1,121 @@
-# One-repository hosting plan
+# One-repository managed hosting
 
-Status: [Neytrib/omni-task](https://github.com/Neytrib/omni-task) is public, with the reviewed source pushed to `main` on 2026-09-30 after owner approval and exact staged-content checks. Cloud configuration and deployment remain future work. The existing local Compose application and tested Ubuntu preparation remain intact.
+Status on 2026-09-30: reviewed source is public at [Neytrib/omni-task](https://github.com/Neytrib/omni-task). Hosting code, frontend transport and service templates are implemented. **The managed application is not deployed or accepted yet.** The owner upgraded Railway to Hobby; the existing [Railway project](https://railway.com/project/06507807-7826-4081-beef-a493a2fd73e4) now contains empty `api`, `bot`, `worker` services in `production`. The API domain `https://api-production-08eb2.up.railway.app` is assigned, and GitHub Pages Actions hosting/public API configuration is enabled. These settings do not imply a running API. The owner's Neon free project exists in Ohio; its direct TLS connection was verified; Upstash setup, migrations and remaining variables are outstanding. [TASKS.md](../TASKS.md) records the latest observed state.
 
-## Source and hosting
+## Where each part runs
 
-Use one public GitHub repository containing the complete backend, bot, worker, frontend, Dockerfiles, Compose configuration, tests and normal documentation. No separate frontend repository and no Cloudflare Pages.
-
-| Destination | Content or process |
+| Destination | Deployment |
 | --- | --- |
-| Public GitHub repository, `main` | Complete reviewed application source and eventual GitHub Actions workflow |
-| GitHub Pages | Only compiled React/Vite frontend assets |
-| Railway | Separate API, polling bot and supervised Celery worker services |
-| Neon | Authoritative PostgreSQL data and authentication state |
-| Upstash | Native Redis over TLS for Celery queues/results and distinct live Pub/Sub |
+| One public GitHub repository | All reviewed application source, Dockerfiles, Compose, tests, documentation and Actions |
+| GitHub Pages | Only `frontend/dist`; intended URL `https://neytrib.github.io/omni-task/` |
+| Railway `api` | FastAPI HTTPS/WSS, private bot API and durable dispatch |
+| Railway `bot` | One polling process and its private voice/notification HTTP adapter |
+| Railway `worker` | Supervised transcription and separate notification/foundation consumers |
+| Neon | PostgreSQL: tasks, ownership, sessions, deduplication and durable work records |
+| Upstash | Native TLS Redis: Celery broker, short-lived results and separate live Pub/Sub |
 
-The final server-side processes run on Railway independently of the developer's computer. Telegram reaches the polling bot; the bot calls the API over private authenticated HTTP. API and worker use Neon and Upstash. Browser HTTPS/WSS reaches the public API; the API owns browser sockets. The worker uses OpenAI only under the existing explicit paid-transcription setting.
+No second frontend repository or Cloudflare Pages is used. Once accepted, the managed system runs without the developer's computer. Local Compose and the previously verified [Ubuntu runbook](DEPLOYMENT.md) remain independent and unchanged. Existing local data has not been uploaded.
 
-## Verified current frontend layout
+## Fill private configuration
 
-| Item | Inspected value |
+```sh
+python3 scripts/configure_hosting.py
+```
+
+From the project root, this creates ignored `private/railway/api.env`, `bot.env` and `worker.env` with mode 0600 in mode-0700 directories. It generates one matching `BOT_API_KEY`, preserves an existing complete set, refuses a partial set rather than overwriting it, and never reads local `.env`. Fill the private copies; public [templates](../deploy/railway) stay placeholders.
+
+| Setting | Service | Fill with |
+| --- | --- | --- |
+| `DATABASE_URL` | API and worker | Neon **direct** PostgreSQL URL with `postgresql+psycopg://` and TLS |
+| `REDIS_URL` | API and worker | Native Upstash `rediss://` URL, database `/0`, verified TLS |
+| `BOT_API_KEY` | All three | Already generated; keep matching and server-only |
+| `TELEGRAM_BOT_TOKEN` | Bot only | BotFather token; leave blank until the previous local poller is stopped |
+| `OPENAI_API_KEY` | Worker only | Owner's OpenAI API project key |
+| `TRANSCRIPTION_PROVIDER`, `TRANSCRIPTION_MODEL` | API and worker | Matching provider/model; templates use `openai` and the configurable model |
+| `ALLOW_PAID_TRANSCRIPTION` | Worker | Templates keep `false`; enable only for approved owner voice use |
+| `BOT_IDENTITY` | API and worker | Stable production namespace; preserve across token rotation |
+
+Templates include the Pages URL/origin, secure partitioned cookies, queue prefix and live channel. Railway references supply private API/bot URLs. The bot receives no PostgreSQL/Redis credentials. Import each private copy into its service's protected **Variables → Raw Editor**; never paste credentials into chat, command arguments or public GitHub variables.
+
+For Neon, disable **Connection pooling** in its connection dialog to obtain the direct hostname, without `-pooler`. Preserve URL escaping and TLS options; change only the scheme from `postgresql://` to `postgresql+psycopg://`. Direct connections support migration advisory locks and avoid transaction-pooler session restrictions. Monitor the selected compute's connection limit; application pools are per process. The application's continuous dispatch/recovery queries keep PostgreSQL active, so do not budget as though the free compute will normally sleep while services run. [Neon connection strings](https://neon.com/docs/connect/connect-from-any-app), [direct versus pooled connections](https://neon.com/docs/connect/connection-pooling).
+
+For Upstash, use native TCP credentials, **not** its HTTPS REST endpoint/token pair. Keep `ssl_cert_reqs=required&ssl_check_hostname=true`; the application rejects disabled TLS verification. The database must support native blocking queue operations, transactions/Lua and Pub/Sub, with enough connection and command capacity for the API and both worker consumers. Use database 0 and keep eviction disabled. Broker/results use `CELERY_BROKER_KEY_PREFIX`; `LIVE_CHANNEL` is separate. PostgreSQL retains accepted work during broker failures. [Native compatibility](https://upstash.com/docs/redis/overall/compatibility), [eviction](https://upstash.com/docs/redis/features/eviction), [durability](https://upstash.com/docs/redis/features/durability).
+
+Celery polls even while idle; a free/trial quota does not promise indefinitely free operation. Review usage limits before enabling services. No paid upgrade is implicit, and actual managed queue/redelivery/Pub/Sub behavior still requires acceptance. [Upstash Celery support and polling costs](https://upstash.com/docs/redis/integrations/celery).
+
+## First start, in order
+
+1. Fill the private Neon direct connection string and obtain the owner-controlled Upstash connection. Complete any remaining provider sign-in/consent with the owner; the existing Hobby approval does not authorize further purchases or independent paid transcription tests.
+2. Use the **existing** `api`, `bot`, `worker` service shells in `production`; do not create duplicates. Import their private variables. Keep the Telegram token blank and do not attach deployment sources until the first migration completes. Service shells let the CLI retrieve API variables before an API container exists.
+3. Review migrations and back up any nonempty database. From the reviewed checkout, execute one controlled migration against the explicit API environment:
+
+   ```sh
+   uv sync --locked
+   railway run --project 06507807-7826-4081-beef-a493a2fd73e4 --environment production --service api --no-local -- uv run --locked alembic current
+   railway run --project 06507807-7826-4081-beef-a493a2fd73e4 --environment production --service api --no-local -- uv run --locked alembic upgrade head
+   railway run --project 06507807-7826-4081-beef-a493a2fd73e4 --environment production --service api --no-local -- uv run --locked alembic current
+   ```
+
+   `railway run` executes locally with protected service variables. `--no-local` prevents Compose development overrides; no database URL enters command history. Initial managed migration has **not** been executed yet.
+4. Validate the locked Railway authoring SDK and review/apply the configuration:
+
+   ```sh
+   npm ci --prefix .railway
+   npm --prefix .railway run check
+   npm --prefix .railway test
+   railway link --project 06507807-7826-4081-beef-a493a2fd73e4 --environment production
+   railway config plan
+   railway config apply
+   ```
+
+   Verify the selected project/environment and exact redacted plan before applying. Never use variable-decryption/show-value options or commit plans. [.railway/railway.ts](../.railway/railway.ts) uses SDK 3.12.0 and CLI 5.49.1+, preserves filled variables, specifies production Dockerfiles, and has no migration startup hook. New services use the current TypeScript IaC, not legacy `railway.json`/`railway.toml`. [Railway IaC](https://docs.railway.com/infrastructure-as-code).
+5. The API domain is already assigned: `https://api-production-08eb2.up.railway.app`, targeting port 8000. Keep bot and worker private. Once deployed, verify `/api/health/ready`, running worker consumers and sanitized logs. The server binds both public IPv4 and private IPv6 traffic.
+6. Stop the old local poller with `docker compose stop bot` before setting that same Telegram token on Railway. Start the cloud bot through its serialized workflow below. Use a different development token before restarting a local bot.
+7. Configure Pages, execute its workflow and complete live acceptance below.
+
+## Automatic deployments
+
+API and worker use Railway GitHub sources on `main`, with relevant source watch patterns. [The bot workflow](../.github/workflows/railway-bot.yml) uses [a guarded deployment script](../scripts/deploy_railway_bot.py) to stop the previous deployment and wait for termination before uploading its replacement. **Do not also enable native GitHub autodeploys for bot:** one replica and zero rolling overlap alone do not guarantee one polling process during replacement. This intentionally introduces a brief bot outage. Never start a manual Railway bot deployment while this workflow runs.
+
+The bot workflow needs repository variables `RAILWAY_PROJECT_ID=06507807-7826-4081-beef-a493a2fd73e4`, `RAILWAY_ENVIRONMENT_ID=1117bb4b-3bcc-4b93-bcf1-e87718dd55b0`, and `RAILWAY_BOT_SERVICE_ID=e7182f5b-ae55-456b-a267-82d677c46f69`. Store the production-environment project token as the **Actions secret** `RAILWAY_TOKEN`. Missing configuration skips deployment with a clear summary; use **Actions → Deploy Telegram bot → Run workflow → main** after setup. A failed/interrupted stop-before-start run can leave the bot stopped; inspect Railway before retrying.
+
+[The Pages workflow](../.github/workflows/pages.yml) runs `npm ci`, tests, type checking and `npm run build` in `frontend/`; it uploads **only** `frontend/dist` using pinned official Pages actions. No backend secret enters its build. It never commits generated files or triggers another deployment workflow.
+
+The same repository's **Settings → Pages → GitHub Actions** source is already enabled. Under **Settings → Secrets and variables → Actions → Variables**, verify:
+
+| Public variable | Value |
 | --- | --- |
-| Directory | `frontend/` |
-| Dependency lock | `frontend/package-lock.json` |
-| Install | `npm ci` with `frontend` as working directory |
-| Production build | `npm run build`, which runs TypeScript checking followed by Vite |
-| Output | `frontend/dist/` |
-| Routing | No React router dependency; one dashboard screen and fragment-token login |
-| Existing Vite base | Default `/`; requires repository-specific production base |
+| `PUBLIC_API_ORIGIN` | Already set to `https://api-production-08eb2.up.railway.app`; update only if the API domain changes |
+| `PUBLIC_WS_ORIGIN` | Optional `wss://` origin on the same API hostname; blank derives it from API |
 
-The eventual production base is `/omni-task/` for `https://neytrib.github.io/omni-task/`. This is the intended Pages address, not a live deployment. Use repository-root fragment login instead of introducing a router solely for Pages. A direct refresh must serve that root index. Preserve local `/login#token=...` compatibility and immediate removal of the visible token. Browser origin validation must stay separate from the full dashboard URL, which includes the repository path.
+The workflow passes these as `VITE_API_ORIGIN`/`VITE_WS_ORIGIN` and sets `VITE_BASE_PATH=/omni-task/`. Missing API configuration produces an explicit summary and skips deployment while local frontend checks/build still run. Invalid origins fail the build. Once configured, use **Actions → Frontend · GitHub Pages → Run workflow → main**; subsequent `main` pushes update Pages automatically.
 
-## Required changes before deployment
+There is no client router or path-based task screen. The dashboard and login open at `https://neytrib.github.io/omni-task/`; the login fragment is removed before requests while retaining that pathname. Root refresh/direct navigation works on static Pages without a 404 redirect or login subdirectory. Local `/` and `/login#token=...` remain supported.
 
-1. **Authentication and transport:** existing requests use relative `/api/` paths and same-origin credentials; sockets derive their address from the page origin. Configure explicit public HTTPS/WSS endpoints for the split deployment. Current HttpOnly `SameSite=Lax` cookies will not work across default Pages/Railway sites. Choose and verify a browser-compatible session approach before deployment: strict credentialed CORS and `SameSite=None; Secure` alone do not bypass third-party-cookie blocking. Retain HttpOnly sessions, CSRF, expiry/revocation, exact origin validation and single-use links; do not put credentials in localStorage or socket URLs. No domain purchase or authentication redesign is implied by this plan.
-2. **Railway builds and private transport:** the existing root Dockerfile ends at the test stage. Give each Railway service an explicit production build/start configuration using the complete root context and correct backend/bot image contents. Configure private API-to-bot and bot-to-API URLs. Expose only the API publicly; keep bot adapter endpoints protected. Keep exactly one poller per Telegram token and stop the local poller before reusing its token remotely.
-3. **Managed data connections:** configure Neon TLS connection URLs and a native `rediss://` Upstash connection with certificate verification. An Upstash REST URL is not a Celery broker. Verify the selected service's queues, Pub/Sub, limits and recovery against real managed services before claiming compatibility is proven for this application. Celery polling consumes Upstash requests even when idle; review the chosen budget before provisioning.
-4. **Migrations:** run reviewed migrations as one controlled operation with a backup and compatibility check. Do not run independent, potentially racing migration commands in API, bot and worker startup, or automatically execute destructive schema changes on every push. Keep local Compose's controlled migration initializer.
+## Authentication and live acceptance
 
-## Automatic deployment after setup
+Hosted sessions use host-only HttpOnly `__Host-omni_session` cookies with `Secure; SameSite=None; Partitioned`. Exact credentialed CORS, CSRF/Origin checks, POST-only single-use exchange, WebSocket authentication and expiry/revocation remain enforced. No permanent credential enters browser localStorage or WSS URLs. After exchange, a session GET verifies the cookie; failure explains possible blocked/unsupported cookies or expiry instead of displaying false success.
 
-On push to `main`, Railway's GitHub integration rebuilds its three services from the same repository. GitHub Actions separately installs and tests/builds `frontend`, uploads only `frontend/dist`, and deploys the Pages artifact. Use GitHub's current official Pages workflow with limited permissions, Pages environment and deployment concurrency. The workflow must not commit generated assets back to `main`; this avoids deployment loops. Railway services deploy independently, so application startup must not assume deployment ordering.
+**Real Pages → Railway cookie and WSS behavior has not yet been verified in Arc.** Partitioned cookies require browser support and compatible privacy settings; universal support is not claimed. All Pages projects under `neytrib.github.io` share a browser origin: treat other published projects on that origin as trusted code, because CORS cannot isolate `/omni-task/` from another path. Pages serves a narrow CSP and no-referrer meta policy, but cannot provide our custom response headers: `frame-ancestors` cannot be enforced through a CSP meta tag. Compose nginx retains its existing frame protection. [Partitioned cookies](https://developer.mozilla.org/en-US/docs/Web/Privacy/Guides/Third-party_cookies/Partitioned_cookies), [CSP delivery limits](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy).
 
-Public build variables may contain only the Pages base and API/WSS addresses. Telegram/OpenAI credentials, database/Redis URLs, service-authentication keys and Railway secrets stay in protected server configuration. No production secret is needed by the Pages build. Recheck the official workflow action versions at implementation rather than treating this plan as a pinned workflow.
+1. Send `/profile`, open its fresh Pages-root link in Arc, verify token removal, the correct private board and Live state. Reload the clean URL and confirm the session survives.
+2. Open a second tab. Create one disposable Telegram text task, change status from Telegram and dashboard, inspect complete content and confirm deletion. Both tabs must synchronize without refreshing.
+3. Disconnect one tab, change state elsewhere and reconnect. Verify authoritative recovery. Test logout across tabs, reused/expired links and a second user's isolated session.
+4. Check voice only under the owner's explicit cost setting. Deterministic/fake-provider checks make no paid request; the owner can perform a real recording test after deliberately enabling transcription. Verify acknowledgement, task creation, notification and live update.
+5. Exercise worker termination/recovery with synthetic work, and managed Redis reconnect in an isolated fixture or approved maintenance window. Local process tests do not prove provider limits or availability.
 
-## Publication sequence and safety gate
+## Update, rollback and troubleshooting
 
-The owner resolved the preflight pause by approving `Neytrib/omni-task`. Steps 1–3 are complete; step 4 is future work. The publication procedure remains:
+For code-only updates, run local checks, inspect exact staged bytes for secrets/confidential artifacts, then push reviewed `main`. API/worker autodeploy, bot restarts serially and Pages builds/deploys independently. IaC changes require a separate reviewed `railway config plan`/`apply`; application pushes do not apply `.railway/` themselves.
 
-1. Reinspect the current tree and credential/confidential-file scan; initialize the project on `main`.
-2. Stage only the reviewed source list. Inspect the complete staged file list and content, including placeholders and lockfiles. Re-run the known-secret/pattern checks against the exact staged bytes; force-adding private files is prohibited. Configure an appropriate Git author identity without exposing a private email inadvertently.
-3. Commit the reviewed source; create one **public** repository under the approved account/name, add `origin`, verify its URL and push `main`.
-4. Implement/test the hosting-specific changes and workflow, then provision/configure providers under the owner's next instructions and any required cost approval. Do not claim a public application exists merely because the source has been pushed.
+For schema changes, review compatibility and back up first. Use maintenance downtime and pause automatic deployments when needed; apply one reviewed migration through the explicit API environment before incompatible code runs. Never run destructive migrations on every process start or push.
 
-The source audit is not approval to upload the whole workspace. `.env`, confidential PDFs/source documents, personal audio, runtime logs, data/dumps, backups and generated archives stay excluded. Root `.env.example` and `production.env.example` are the only allowed environment examples and contain placeholders/empty external keys. Git ignore rules do not protect already tracked or force-added files, so the staged-tree check is mandatory before the first push. The prior S9 archive remains an older immutable snapshot, not the source for this new repository.
+Before reverting code on `main`, verify that the current schema supports the older release. Do not automatically downgrade or restore over the live database. Restore necessary data into a **separate** Neon database/branch, verify it, then deliberately switch API/worker connection variables. Keep the original database until recovery is proven. The [backup/restore runbook](BACKUP_RESTORE.md) and S9 rehearsal cover Compose; a managed Neon restore has not yet been rehearsed.
 
-## Official references
+Use scoped Railway deployment status and sanitized logs. Polling conflicts indicate another process using the token; login failures require checking exact origin/cookie flags/browser support; reconnecting state requires checking WSS, Redis subscription and provider quotas. Never print `railway run env`, secret URL values, cookies, login links, recordings or transcripts into logs/support reports.
 
-- [Git ignore semantics](https://git-scm.com/docs/gitignore)
-- [GitHub Pages custom workflow](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
-- [Vite static deployment](https://vite.dev/guide/static-deploy)
-- [Railway GitHub autodeploys](https://docs.railway.com/deployments/github-autodeploys), [Dockerfiles](https://docs.railway.com/builds/dockerfiles), [private networking](https://docs.railway.com/networking/private-networking)
-- [Credentialed CORS and third-party cookies](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS)
-- [Upstash Celery integration and polling costs](https://upstash.com/docs/redis/integrations/celery)
+Current hosting checks report **452 backend tests**, **40 bot-deployment guard tests**, **4 Railway configuration checks**, and **172 frontend tests** passing, with frontend type checking and local/Pages builds. Exact commands and final evidence belong in TASKS.md; these local checks do not imply cloud acceptance. Remaining work: provider credentials, service configuration/migration, workflow execution, live Arc authentication/WSS and managed restore checks.
+
+## Public-source boundary
+
+Only reviewed source, placeholder templates and normal documentation belong in Git. `.env`, `private/`, credentials, confidential PDFs/source documents, recordings, logs, backups and real database dumps remain excluded from Git, Docker contexts and submission archives. The bot workflow's Railway token belongs in a GitHub **secret**, never a public variable or frontend build. Check exact staged bytes before every push; ignore rules cannot protect already tracked or force-added files. The S9 archive remains an older immutable snapshot. The owner-approved Hobby subscription does not authorize further purchases or independent paid transcription tests.

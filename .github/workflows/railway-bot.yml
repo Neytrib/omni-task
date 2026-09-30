@@ -1,0 +1,48 @@
+name: Deploy Telegram bot
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never interrupt a stop-then-start sequence. Only this workflow deploys the bot;
+# its Railway service intentionally has no native GitHub source connection.
+concurrency:
+  group: railway-polling-bot
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.repository == 'Neytrib/omni-task' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
+      RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
+      RAILWAY_BOT_SERVICE_ID: ${{ vars.RAILWAY_BOT_SERVICE_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check deployment configuration
+        id: configuration
+        env:
+          RAILWAY_TOKEN_AVAILABLE: ${{ secrets.RAILWAY_TOKEN != '' }}
+        run: python3 scripts/deploy_railway_bot.py --check-config
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.configuration.outputs.enabled == 'true'
+        with:
+          node-version: '24'
+      - name: Install pinned Railway CLI
+        if: steps.configuration.outputs.enabled == 'true'
+        run: npm install --global @railway/cli@5.63.1
+      - name: Stop previous bot, deploy and verify replacement
+        if: steps.configuration.outputs.enabled == 'true'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          CI: 'true'
+        run: python3 scripts/deploy_railway_bot.py

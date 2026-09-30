@@ -1,3 +1,5 @@
+import { taskWebSocketUrl } from './transport';
+
 export type LiveTaskMessage =
   | { type: 'ready' | 'heartbeat' | 'resync'; revision: number; live: boolean }
   | { type: 'task_created' | 'task_updated' | 'task_deleted'; revision: number; task_id: string };
@@ -22,8 +24,7 @@ export function parseLiveTaskMessage(data: unknown): LiveTaskMessage | null {
 // Each board owns its connection. Only the HttpOnly session cookie authenticates
 // it: no identity, cursor, login token, or CSRF secret belongs in this URL.
 export function connectLiveTasks(callbacks: Callbacks) {
-  const url = new URL('/api/ws/tasks', window.location.origin);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = taskWebSocketUrl();
   let socket: WebSocket | null = null;
   let stopped = false;
   let attempts = 0;

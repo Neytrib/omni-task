@@ -15,6 +15,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import auth, schemas, services, voice
+from app.browser_transport import BrowserCORSMiddleware, session_cookie
 from app.config import Settings
 from app.errors import AppError
 from app.models import ProcessingRequest
@@ -359,15 +360,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if old is not None:
                 old.revoked_at = services.utcnow()
         db.commit()
-        response.set_cookie(
-            key=settings.cookie_name,
-            value=token,
-            max_age=settings.session_ttl_seconds,
-            httponly=True,
-            secure=settings.cookie_secure,
-            samesite="lax",
-            path="/",
-        )
+        session_cookie(response, settings, token)
         return {"expires_at": session.expires_at}
 
     @browser.get("/session")
@@ -383,13 +376,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         current.session.revoked_at = services.utcnow()
         db.commit()
         response = Response(status_code=204)
-        response.delete_cookie(
-            settings.cookie_name,
-            path="/",
-            secure=settings.cookie_secure,
-            httponly=True,
-            samesite="lax",
-        )
+        session_cookie(response, settings, clear=True)
         return response
 
     @browser.get("/tasks", response_model=schemas.TaskPage)
@@ -434,4 +421,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application.include_router(bot)
     application.include_router(browser)
+    # Added last so even security/operational errors receive CORS headers. The
+    # existing boundary catches failures and returns safe, no-store responses.
+    application.add_middleware(
+        BrowserCORSMiddleware,
+        allow_origins=[settings.dashboard_origin],
+        allow_credentials=True,
+        allow_methods=["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key", "If-Match"],
+        expose_headers=["X-Request-ID", "X-Correlation-ID"],
+        max_age=600,
+    )
     return application

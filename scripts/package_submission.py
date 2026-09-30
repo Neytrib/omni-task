@@ -30,6 +30,19 @@ ROOT_FILES = {
     "omni_logging.py",
 }
 SOURCE_DIRS = {"backend", "bot", "frontend", "scripts", "tests", "docs", "deploy"}
+EXACT_SOURCES = {
+    ".railway/railway.ts",
+    ".railway/package.json",
+    ".railway/package-lock.json",
+    ".railway/tsconfig.json",
+    ".railway/config.test.mjs",
+    ".railway/README.md",
+    "deploy/railway/backend.Dockerfile",
+    "deploy/railway/bot.Dockerfile",
+    "deploy/railway/api.env.example",
+    "deploy/railway/bot.env.example",
+    "deploy/railway/worker.env.example",
+}
 EXCLUDED = {
     ".git",
     ".venv",
@@ -39,6 +52,12 @@ EXCLUDED = {
     "data",
     "uploads",
     "secrets",
+    "private",
+    "confidential",
+    "recordings",
+    "backups",
+    "source-documents",
+    "vacancy-private",
     "__pycache__",
     ".pytest_cache",
     ".ruff_cache",
@@ -47,7 +66,16 @@ EXCLUDED = {
     "assessment-private",
 }
 SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".css", ".html", ".json", ".md", ".txt", ".conf", ".mako"}
-SECRET_NAMES = {"POSTGRES_PASSWORD", "BOT_API_KEY", "TELEGRAM_BOT_TOKEN", "OPENAI_API_KEY"}
+SECRET_NAMES = {
+    "POSTGRES_PASSWORD",
+    "BOT_API_KEY",
+    "TELEGRAM_BOT_TOKEN",
+    "OPENAI_API_KEY",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "RAILWAY_TOKEN",
+    "RAILWAY_API_TOKEN",
+}
 SUSPICIOUS = re.compile(
     rb"(?:sk-(?:proj-)?[A-Za-z0-9_-]{24,}|\b[0-9]{7,}:[A-Za-z0-9_-]{30,}|"
     rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)"
@@ -56,16 +84,20 @@ SUSPICIOUS = re.compile(
 
 def local_secrets(root: Path) -> set[bytes]:
     """Read only known local secret values for comparison; never emit them."""
-    env = root / ".env"
-    if not env.is_file() or env.is_symlink():
-        return set()
     values = set()
-    for line in env.read_text().splitlines():
-        key, separator, value = line.partition("=")
-        value = value.strip().strip("\"'")
-        if separator and key.strip() in SECRET_NAMES and len(value) >= 16:
-            if not value.startswith("REPLACE_"):
-                values.add(value.encode())
+    locations = [
+        root / ".env",
+        *(root / "private/railway" / f"{name}.env" for name in ("api", "bot", "worker")),
+    ]
+    for env in locations:
+        if not env.is_file() or any(part.is_symlink() for part in (env, *env.parents)):
+            continue
+        for line in env.read_text().splitlines():
+            key, separator, value = line.partition("=")
+            value = value.strip().strip("\"'")
+            if separator and key.strip() in SECRET_NAMES and len(value) >= 16:
+                if "REPLACE_" not in value and not value.startswith("${{"):
+                    values.add(value.encode())
     return values
 
 
@@ -78,14 +110,22 @@ def collect_sources(root: Path) -> dict[str, bytes]:
             name
             for name in dirs
             if name not in EXCLUDED
-            and not name.startswith(".")
+            and (
+                not name.startswith(".") or (not relative.parts and name in {".railway", ".github"})
+            )
             and not (Path(directory) / name).is_symlink()
-            and (relative.parts or name in SOURCE_DIRS)
+            and (relative.parts or name in SOURCE_DIRS | {".railway", ".github"})
+            and not (relative.parts == (".railway",))
+            and not (relative.parts == (".github",) and name != "workflows")
         )
         for name in sorted(files):
             path = Path(directory) / name
             member = path.relative_to(root)
-            if not member.parent.parts:
+            if member.as_posix() in EXACT_SOURCES:
+                allowed = True
+            elif member.parent.parts == (".github", "workflows"):
+                allowed = path.suffix in {".yml", ".yaml"} and not name.startswith(".")
+            elif not member.parent.parts:
                 allowed = name in ROOT_FILES
             else:
                 allowed = (
