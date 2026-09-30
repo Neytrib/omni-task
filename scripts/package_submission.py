@@ -1,0 +1,148 @@
+"""Create a source-only submission; never copy the workspace wholesale."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import io
+import os
+import re
+import tarfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+ROOT_FILES = {
+    ".env.example",
+    ".gitignore",
+    ".dockerignore",
+    "AGENTS.md",
+    "DESIGN.md",
+    "SPEC.md",
+    "TASKS.md",
+    "README.md",
+    "Dockerfile",
+    "docker-compose.yml",
+    "compose.production.yml",
+    "production.env.example",
+    "pyproject.toml",
+    "uv.lock",
+    "alembic.ini",
+    "omni_logging.py",
+}
+SOURCE_DIRS = {"backend", "bot", "frontend", "scripts", "tests", "docs", "deploy"}
+EXCLUDED = {
+    ".git",
+    ".venv",
+    "node_modules",
+    "dist",
+    "tmp",
+    "data",
+    "uploads",
+    "secrets",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    "coverage",
+    ".vitest",
+    "assessment-private",
+}
+SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".css", ".html", ".json", ".md", ".txt", ".conf", ".mako"}
+SECRET_NAMES = {"POSTGRES_PASSWORD", "BOT_API_KEY", "TELEGRAM_BOT_TOKEN", "OPENAI_API_KEY"}
+SUSPICIOUS = re.compile(
+    rb"(?:sk-(?:proj-)?[A-Za-z0-9_-]{24,}|\b[0-9]{7,}:[A-Za-z0-9_-]{30,}|"
+    rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)"
+)
+
+
+def local_secrets(root: Path) -> set[bytes]:
+    """Read only known local secret values for comparison; never emit them."""
+    env = root / ".env"
+    if not env.is_file() or env.is_symlink():
+        return set()
+    values = set()
+    for line in env.read_text().splitlines():
+        key, separator, value = line.partition("=")
+        value = value.strip().strip("\"'")
+        if separator and key.strip() in SECRET_NAMES and len(value) >= 16:
+            if not value.startswith("REPLACE_"):
+                values.add(value.encode())
+    return values
+
+
+def collect_sources(root: Path) -> dict[str, bytes]:
+    result = {}
+    secrets = local_secrets(root)
+    for directory, dirs, files in os.walk(root, followlinks=False):
+        relative = Path(directory).relative_to(root)
+        dirs[:] = sorted(
+            name
+            for name in dirs
+            if name not in EXCLUDED
+            and not name.startswith(".")
+            and not (Path(directory) / name).is_symlink()
+            and (relative.parts or name in SOURCE_DIRS)
+        )
+        for name in sorted(files):
+            path = Path(directory) / name
+            member = path.relative_to(root)
+            if not member.parent.parts:
+                allowed = name in ROOT_FILES
+            else:
+                allowed = (
+                    not name.startswith(".")
+                    and member.parts[0] in SOURCE_DIRS
+                    and (path.suffix in SOURCE_SUFFIXES or name in {"Dockerfile", "Caddyfile"})
+                    and "AI_Engineering_Intern_Technical_Task" not in name
+                )
+            if not allowed:
+                continue
+            if path.is_symlink() or not path.is_file():
+                raise ValueError(f"Submission source is not a regular file: {member}")
+            content = path.read_bytes()
+            if SUSPICIOUS.search(content) or any(value in content for value in secrets):
+                raise ValueError(f"Potential credential in submission source: {member}")
+            result[member.as_posix()] = content
+    required = {"README.md", "docker-compose.yml", "Dockerfile", "pyproject.toml", "uv.lock"}
+    if not required.issubset(result):
+        raise ValueError("Incomplete source tree; required project files are missing")
+    return dict(sorted(result.items()))
+
+
+def package(root: Path, output: Path) -> tuple[int, str]:
+    sources = collect_sources(root)
+    manifest = "".join(
+        f"{hashlib.sha256(content).hexdigest()}  {name}\n" for name, content in sources.items()
+    ).encode()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with (
+            os.fdopen(descriptor, "wb") as handle,
+            tarfile.open(fileobj=handle, mode="w:gz") as archive,
+        ):
+            for name, content in {**sources, "MANIFEST.sha256": manifest}.items():
+                member = tarfile.TarInfo("omni-task/" + name)
+                member.size = len(content)
+                member.mode = 0o644
+                archive.addfile(member, io.BytesIO(content))
+    except BaseException:
+        output.unlink(missing_ok=True)
+        raise
+    digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    return len(sources), digest
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, default=ROOT / "dist/omni-task-submission.tar.gz")
+    args = parser.parse_args()
+    try:
+        count, digest = package(ROOT, args.output)
+    except (OSError, ValueError) as error:
+        raise SystemExit(str(error)) from None
+    print(f"Created source-only submission: {args.output} ({count} files + manifest)")
+    print(f"SHA256 {digest}")
+
+
+if __name__ == "__main__":
+    main()

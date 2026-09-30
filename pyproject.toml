@@ -1,0 +1,38 @@
+[project]
+name = "omni-task"
+version = "0.1.0"
+description = "Private Telegram-linked task manager foundation"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi",
+  "uvicorn",
+  "httpx",
+  "pydantic-settings",
+]
+
+[dependency-groups]
+backend = [
+  "sqlalchemy",
+  "psycopg[binary]",
+  "alembic",
+  "celery[redis]",
+  "websockets>=17.1",
+]
+bot = ["aiogram"]
+dev = ["pytest", "ruff"]
+
+[tool.uv]
+package = false
+default-groups = ["backend", "dev"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["backend", "."]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

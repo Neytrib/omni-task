@@ -1,0 +1,72 @@
+# Compose 2.24.4+; combine with docker-compose.yml and an explicit protected env file.
+# The base file remains the local development configuration.
+x-production-logs: &production-logs
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+x-production-backend: &production-backend
+  image: omni-task-backend:${RELEASE_TAG:?Set a unique RELEASE_TAG in the protected production env file}
+  environment:
+    APP_ENV: production
+    COOKIE_SECURE: 'true'
+    DASHBOARD_ORIGIN: https://${DOMAIN:?Set the public hostname without a scheme or path}
+  logging: *production-logs
+
+services:
+  postgres:
+    logging: *production-logs
+  redis:
+    logging: *production-logs
+  migrate:
+    <<: *production-backend
+  api:
+    <<: *production-backend
+  worker:
+    <<: *production-backend
+    stop_grace_period: 40s
+  bot:
+    image: omni-task-bot:${RELEASE_TAG:?Set a unique RELEASE_TAG}
+    logging: *production-logs
+  frontend:
+    image: omni-task-frontend:${RELEASE_TAG:?Set a unique RELEASE_TAG}
+    ports: !reset []
+    networks: [service, edge]
+    logging: *production-logs
+  edge:
+    image: caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
+    environment:
+      DOMAIN: ${DOMAIN:?Set the public hostname without a scheme or path}
+      ACME_EMAIL: ${ACME_EMAIL:?Set the certificate account contact email}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    depends_on:
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8081/health']
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    logging: *production-logs
+
+networks:
+  edge:
+
+volumes:
+  caddy_data:
+  caddy_config:

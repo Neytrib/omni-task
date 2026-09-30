@@ -1,0 +1,41 @@
+{
+	admin off
+	email {$ACME_EMAIL}
+	skip_install_trust
+	servers {
+		protocols h1 h2
+	}
+	# No access logger. Remove request details from runtime errors too: a failed
+	# upstream must not place query tokens, cookies or headers in container logs.
+	log default {
+		output stdout
+		level WARN
+		format filter {
+			wrap json
+			fields {
+				request delete
+			}
+		}
+	}
+}
+
+{$DOMAIN} {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	# Existing nginx serves the built app and proxies only public API/WS routes.
+	# Caddy preserves Host/Origin/Cookie and supports WebSocket upgrades.
+	reverse_proxy frontend:8080 {
+		transport http {
+			dial_timeout 3s
+			response_header_timeout 35s
+		}
+	}
+}
+
+# Container-local liveness only; this port is neither published nor remotely bound.
+http://127.0.0.1:8081 {
+	bind 127.0.0.1
+	respond /health "ready" 200
+}

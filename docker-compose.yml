@@ -1,0 +1,154 @@
+name: omni-task
+
+x-backend-environment: &backend-environment
+  APP_ENV: ${APP_ENV:-development}
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-omni_task}:${POSTGRES_PASSWORD:?Run python3 scripts/configure_env.py}@postgres:5432/${POSTGRES_DB:-omni_task}
+  REDIS_URL: redis://redis:6379/0
+  BOT_API_KEY: ${BOT_API_KEY:?Run python3 scripts/configure_env.py}
+  BOT_IDENTITY: ${BOT_IDENTITY:-omni-task-local}
+  DASHBOARD_ORIGIN: ${DASHBOARD_ORIGIN:-http://127.0.0.1:8080}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-604800}
+  LOGIN_TTL_SECONDS: ${LOGIN_TTL_SECONDS:-300}
+  LIVE_CHANNEL: ${LIVE_CHANNEL:-omni-task:live:v1}
+  BOT_BASE_URL: http://bot:8001
+  VOICE_MAX_DURATION_SECONDS: ${VOICE_MAX_DURATION_SECONDS:-600}
+  VOICE_MAX_BYTES: ${VOICE_MAX_BYTES:-19000000}
+  VOICE_DOWNLOAD_TIMEOUT_SECONDS: ${VOICE_DOWNLOAD_TIMEOUT_SECONDS:-30}
+  VOICE_CONVERSION_TIMEOUT_SECONDS: ${VOICE_CONVERSION_TIMEOUT_SECONDS:-30}
+  VOICE_PROVIDER_TIMEOUT_SECONDS: ${VOICE_PROVIDER_TIMEOUT_SECONDS:-90}
+  TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-disabled}
+  TRANSCRIPTION_MODEL: ${TRANSCRIPTION_MODEL:-whisper-1}
+
+x-backend: &backend
+  image: omni-task-backend:local
+  build:
+    context: .
+    target: backend
+  environment: *backend-environment
+  init: true
+  networks: [service, data]
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-omni_task}
+      POSTGRES_DB: ${POSTGRES_DB:-omni_task}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run python3 scripts/configure_env.py}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [data]
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    command: [redis-server, --appendonly, 'yes', --appendfsync, everysec, --maxmemory, 256mb, --maxmemory-policy, noeviction]
+    volumes:
+      - redis_data:/data
+    networks: [data]
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # One controlled initializer; API and worker never race to apply migrations.
+  migrate:
+    <<: *backend
+    command: [alembic, upgrade, head]
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/api/health/ready", timeout=3)']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  worker:
+    <<: *backend
+    environment:
+      <<: *backend-environment
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ALLOW_PAID_TRANSCRIPTION: ${ALLOW_PAID_TRANSCRIPTION:-false}
+    command: [python, -m, app.jobs.worker]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -m, app.jobs.worker, --health]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 15s
+
+  bot:
+    image: omni-task-bot:local
+    build:
+      context: .
+      target: bot
+    environment:
+      API_BASE_URL: http://api:8000
+      BOT_API_KEY: ${BOT_API_KEY:?Run python3 scripts/configure_env.py}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      VOICE_MAX_DURATION_SECONDS: ${VOICE_MAX_DURATION_SECONDS:-600}
+      VOICE_MAX_BYTES: ${VOICE_MAX_BYTES:-19000000}
+      VOICE_DOWNLOAD_TIMEOUT_SECONDS: ${VOICE_DOWNLOAD_TIMEOUT_SECONDS:-30}
+    networks: [service]
+    init: true
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8001/health/ready", timeout=5)']
+      interval: 15s
+      timeout: 8s
+      retries: 6
+
+  frontend:
+    image: omni-task-frontend:local
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - '127.0.0.1:8080:8080'
+    networks: [service]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/health]
+      interval: 15s
+      timeout: 3s
+      retries: 6
+
+networks:
+  service:
+  data:
+    internal: true
+
+volumes:
+  postgres_data:
+  redis_data:
