@@ -7,6 +7,13 @@ import httpx
 
 from omni_logging import current_correlation_id
 
+VOICE_ADMISSION_CODES = {
+    "voice_user_busy",
+    "voice_service_busy",
+    "voice_user_quota",
+    "voice_service_quota",
+}
+
 
 class APIError(Exception):
     """A safe API outcome. Never retain response bodies, content, URLs, or credentials."""
@@ -43,7 +50,7 @@ class APIClient:
             response = await self.client.request(method, path, headers=headers, **kwargs)
         except httpx.HTTPError:
             raise APIUnavailable() from None
-        if response.status_code == 429 or response.status_code >= 500:
+        if response.status_code >= 500:
             raise APIUnavailable(response.status_code)
         if not response.is_success:
             code = "api_error"
@@ -55,6 +62,12 @@ class APIClient:
                         code = candidate
             except ValueError:
                 pass
+            if response.status_code == 429 and not (
+                method == "POST"
+                and path == "/internal/bot/processing-requests"
+                and code in VOICE_ADMISSION_CODES
+            ):
+                raise APIUnavailable(response.status_code)
             raise APIError(response.status_code, code)
         if response.status_code == 204:
             return {}

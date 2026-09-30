@@ -148,6 +148,45 @@ def test_api_transient_status_is_retryable_without_echoing_bodies(status):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize(
+    "method,path,status,body",
+    [
+        ("POST", "/internal/bot/tasks", 429, {"error": {"code": "voice_user_quota"}}),
+        (
+            "GET",
+            "/internal/bot/processing-requests",
+            429,
+            {"error": {"code": "voice_user_quota"}},
+        ),
+        (
+            "POST",
+            "/internal/bot/processing-requests",
+            503,
+            {"error": {"code": "voice_user_quota"}},
+        ),
+        (
+            "POST",
+            "/internal/bot/processing-requests",
+            429,
+            {"error": {"code": "unknown_limit", "message": "PRIVATE"}},
+        ),
+        ("POST", "/internal/bot/processing-requests", 429, ["PRIVATE"]),
+    ],
+)
+def test_only_voice_admission_rejections_are_terminal(method, path, status, body):
+    async def scenario():
+        async with httpx.AsyncClient(
+            base_url="http://api",
+            transport=httpx.MockTransport(lambda _: httpx.Response(status, json=body)),
+        ) as client:
+            with pytest.raises(APIUnavailable) as error:
+                await APIClient(client)._request(method, path)
+            assert error.value.status == status
+            assert "PRIVATE" not in str(error.value)
+
+    asyncio.run(scenario())
+
+
 def test_api_client_preserves_complete_content_actor_and_source_message():
     async def scenario():
         content = "  Full source\nՀայերեն 🧪 "

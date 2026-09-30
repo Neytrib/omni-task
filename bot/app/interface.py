@@ -118,6 +118,17 @@ class TelegramInterface:
 
     @staticmethod
     def error_text(error: APIError) -> str:
+        voice_admission_messages = {
+            "voice_user_busy": "You already have voice recordings waiting to finish.",
+            "voice_service_busy": "Voice transcription is busy right now.",
+            "voice_user_quota": "You've reached your voice transcription limit for now.",
+            "voice_service_quota": "Voice transcription is temporarily unavailable.",
+        }
+        if error.status == 429 and error.code in voice_admission_messages:
+            return (
+                voice_admission_messages[error.code]
+                + " No task was queued. Send text instead or try again later."
+            )
         if error.status in (401, 403):
             return "The bot cannot authenticate to the task service. Please try again later."
         if error.status == 410:
@@ -275,8 +286,12 @@ class TelegramInterface:
             raise
         except APIError as error:
             self.voice_receipts.pop(source, None)
-            if acknowledgement:
-                await self.show(acknowledgement, actor, View(self.error_text(error)), edit=True)
+            await self.show(
+                acknowledgement or message,
+                actor,
+                View(self.error_text(error)),
+                edit=acknowledgement is not None,
+            )
             return
         self.voice_receipts.pop(source, None)
         if acknowledgement is None:

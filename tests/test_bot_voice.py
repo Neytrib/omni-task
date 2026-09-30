@@ -1,6 +1,7 @@
 """Voice interaction and private adapter tests use fake Telegram/network transports only."""
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from uuid import uuid4
@@ -10,16 +11,17 @@ import pytest
 from aiogram import Bot
 from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
 from aiogram.methods import SendMessage
-from aiogram.types import File
+from aiogram.types import File, Update
 from aiohttp import ClientConnectionError
 from conftest import BOT_KEY
 from fastapi import FastAPI
-from test_bot import ACTOR, FAKE_TOKEN, Harness, TelegramTransport, bot_harness
+from test_bot import ACTOR, FAKE_TOKEN, OTHER_ACTOR, Harness, TelegramTransport, bot_harness
 
 from bot.app.api import APIClient, APIError, APIUnavailable
 from bot.app.config import BotSettings
 from bot.app.handlers import create_dispatcher
 from bot.app.navigation import Navigation
+from bot.app.polling import PollingStatus, run_polling
 from bot.app.voice import VoiceAdapter, install_voice_routes
 
 IDENTIFIER = str(uuid4())
@@ -185,6 +187,106 @@ def test_failed_ack_still_accepts_and_failure_feedback_does_not_confirm_unaccept
             assert "could not confirm acceptance" in harness.latest().text
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "code,explanation",
+    [
+        ("voice_user_busy", "already have voice recordings waiting"),
+        ("voice_service_busy", "busy right now"),
+        ("voice_user_quota", "your voice transcription limit"),
+        ("voice_service_quota", "temporarily unavailable"),
+    ],
+)
+@pytest.mark.parametrize("acknowledgement_fails", [False, True])
+def test_voice_admission_rejection_resolves_receipt_and_polling_continues(
+    code, explanation, acknowledgement_fails, caplog
+):
+    sentinel = "PRIVATE ADMISSION COUNTS MUST NOT APPEAR"
+
+    async def scenario():
+        stop, status = asyncio.Event(), PollingStatus()
+        api_calls, offsets = [], []
+        updates = [
+            Update.model_validate(
+                {
+                    "update_id": identifier,
+                    "message": {
+                        "message_id": identifier,
+                        "date": 1790726400,
+                        "chat": {"id": actor, "type": "private"},
+                        "from_user": {"id": actor, "is_bot": False, "first_name": "Synthetic"},
+                        **content,
+                    },
+                }
+            )
+            for identifier, actor, content in (
+                (1, ACTOR, {"voice": VOICE}),
+                (2, OTHER_ACTOR, {"text": "/help"}),
+                (3, OTHER_ACTOR, {"text": "Synthetic next user's task"}),
+            )
+        ]
+
+        class PollingTelegram(VoiceTelegram):
+            async def make_request(self, bot, method, timeout=None):
+                if method.__api_method__ == "getUpdates":
+                    offsets.append(method.offset)
+                    if len(offsets) == 1:
+                        return updates
+                    stop.set()
+                    return []
+                return await super().make_request(bot, method, timeout)
+
+        def respond(request):
+            api_calls.append((request.url.path, json.loads(request.content)))
+            if request.url.path == "/internal/bot/processing-requests":
+                return httpx.Response(429, json={"error": {"code": code, "message": sentinel}})
+            if request.url.path == "/internal/bot/users":
+                return httpx.Response(200, json={})
+            assert request.url.path == "/internal/bot/tasks"
+            return httpx.Response(201, json=TASK)
+
+        telegram = PollingTelegram([])
+        telegram.fail_send_once = acknowledgement_fails
+        bot = Bot(FAKE_TOKEN, session=telegram)
+        try:
+            async with httpx.AsyncClient(
+                base_url="http://api", transport=httpx.MockTransport(respond)
+            ) as client:
+                dispatcher = create_dispatcher(APIClient(client), BotSettings(bot_api_key=BOT_KEY))
+                await asyncio.wait_for(run_polling(bot, dispatcher, stop, status, retry_delay=0), 2)
+                assert not dispatcher["interface"].voice_receipts
+        finally:
+            await bot.session.close()
+        assert offsets == [None, 4]
+        assert status.state == "stopped"
+        voice_calls = [body for path, body in api_calls if path.endswith("processing-requests")]
+        assert len(voice_calls) == 1
+        assert (voice_calls[0]["acknowledgement_message_id"] is None) == acknowledgement_fails
+        text_calls = [body for path, body in api_calls if path.endswith("/tasks")]
+        assert text_calls == [
+            {
+                "telegram_user_id": OTHER_ACTOR,
+                "message_id": 3,
+                "content": "Synthetic next user's task",
+            }
+        ]
+        replies = [message for (actor, _), message in telegram.messages.items() if actor == ACTOR]
+        assert len(replies) == 1
+        assert explanation in replies[0].text
+        assert "No task was queued. Send text instead or try again later." in replies[0].text
+        assert "Queuing" not in replies[0].text and sentinel not in replies[0].text
+        other_replies = [
+            message.text
+            for (actor, _), message in telegram.messages.items()
+            if actor == OTHER_ACTOR
+        ]
+        assert len(other_replies) == 2
+        assert "Creating tasks" in other_replies[0]
+        assert "Task saved" in other_replies[1]
+
+    asyncio.run(scenario())
+    assert sentinel not in caplog.text
 
 
 @pytest.mark.parametrize(
