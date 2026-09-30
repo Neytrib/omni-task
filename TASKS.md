@@ -680,3 +680,46 @@ Runtime verification passed: both consumers in new worker container `91ea50411b3
 `git diff --check` and `.venv/bin/pytest -q tests/test_publication_boundaries.py tests/test_submission.py` passed (15 tests, one existing Starlette/httpx deprecation warning). Application code is unchanged; existing integration results remain historical evidence, and real provider billing/quota/transcription is deliberately left to the owner's voice test.
 
 Manual acceptance: send `/start` and `/profile` to `@omni_task_manager_bot`; open the fresh dashboard link in Arc and verify the `neytrib.github.io/omni-task/` address. Send a text task, observe it live, change status from both interfaces, inspect full details and confirm deletion of that test task. If choosing to exercise the enabled paid voice setting, send a new short recording and verify quick acknowledgement, one task and a final result. The assistant submitted no voice recording. Existing local tasks remain in local PostgreSQL; the hosted board uses the separate Neon dataset. Do not start another local poller with the production token. Stop after activation and runtime verification; managed restore and real hosted Telegram/voice acceptance are not claimed complete.
+
+## Security review fixes 1 and 2 — 2026-09-30
+
+Authorized scope: fix public voice intake without aggregate limits and packaging that could include ignored credential JSON. The owner explicitly prohibited commit and deployment. Work is local only; review findings about hosted database TLS, login lock ordering and socket database timeouts are unchanged.
+
+### Changes
+
+- Shared API/domain admission now uses PostgreSQL transaction advisory lock `739142811` before the owner lock, then checks persisted counts and inserts atomically. Defaults are 10 accepted recordings per user and 50 globally in the preceding 24 hours; 2 queued/processing recordings per user and 10 globally, regardless of age. Settings reject nonpositive/unbounded values. All providers count. Duplicate/deleted-source replay and payload conflict behavior are preserved before checking new-intake allowances; failures and task deletion do not refund daily usage. Rejections roll back receipts and create no jobs/notifications. Already accepted work can still retry and finish.
+- The acceptance timestamp uses PostgreSQL wall-clock time after locking. Model and migration `0004_voice_admission_index` add a `created_at` index for the rolling window. It was applied only in disposable test databases; existing local/cloud schemas were not migrated. The restore fixture passes required settings and commits owner-locked setup before starting voice intake.
+- Four quota-specific 429 codes are terminal for the bot's voice POST only. The receipt clearly says no task was queued; if preliminary acknowledgement failed, the rejection replies to the original message. The next user's command/text is still handled. Other 429s, 5xx and network errors retain durable retry behavior. API defaults, example files, Compose injection and Railway `preserve()` declarations document/configure the limits without modifying private or live values.
+- Packaging rejects private path components before source selection, including credential/service-account JSON, appended `.env`/log/database/backup/key/document/media/archive suffixes and case variants. It preserves the five exact public environment templates and works without Git metadata. Existing key-pattern/known-secret/symlink guards remain. Tests inspect actual synthetic archive members, bytes and manifest across 29 private path variants. No actual submission archive was regenerated.
+- README and SPEC explain the defaults, safe rollout and limits of the guarantee: these are admission/backlog caps, not exact currency spend or provider-execution-day accounting. Provider attempts remain independently bounded by existing settings, and older accepted work may execute later.
+
+### Checks actually run
+
+Docker test commands used the existing process-only prefix `DOCKER_CONFIG=/Users/neytrib/Desktop/omni_task/tmp/s7-docker-config DOCKER_HOST=unix:///Users/neytrib/.docker/run/docker.sock`; no Docker settings were changed.
+
+| Command/check | Observed result |
+| --- | --- |
+| `.venv/bin/pytest -q tests/test_submission.py tests/test_publication_boundaries.py` | 16 passed. Synthetic archive/manifest exclusions and Git-policy parity covered. |
+| `.venv/bin/pytest -q tests/test_bot_runtime.py tests/test_bot_voice.py -k 'not real_'` | 64 passed, 2 database cases deliberately deselected here and included in the full run. Real aiogram dispatcher/poller with fake Telegram/HTTP transports checks all four quota codes, acknowledgement failure, one intake call and continued polling. |
+| `.venv/bin/python scripts/test_backend.py -q tests/test_voice_admission.py tests/test_voice_domain.py tests/test_config.py tests/test_bot_runtime.py tests/test_bot_voice.py tests/test_transactions.py tests/test_submission.py tests/test_publication_boundaries.py` | 167 passed. Real PostgreSQL proves all four boundaries, same-/different-owner races, duplicate/conflict behavior while full, old pending work, expired window, no refunds after terminal/deleted outcomes, transaction rollback and worker completion. Migration/model consistency passed. |
+| `.venv/bin/python scripts/test_backend.py -q` | 539 passed, no skips, 62.06 seconds. Full real PostgreSQL/Redis and separate-process recovery suite, fake external transports/providers. One existing Starlette/httpx TestClient deprecation warning. |
+| `npm --prefix .railway run check`; `npm --prefix .railway test` | Type check passed; 4 configuration tests passed. No IaC plan/apply or deployment command. |
+| `.venv/bin/ruff check omni_logging.py backend bot scripts tests deploy`; `.venv/bin/ruff format --check omni_logging.py backend bot scripts tests deploy` | Passed; 85 Python files formatted. |
+| `docker compose config --quiet`; `git diff --check` | Passed. Configuration output was quiet; no secret values printed. |
+| Changed-source credential-pattern scan; embedded restore SEED compilation | No recognized credential matches in the 22 then-changed source files; embedded Python syntax passed. Full Compose restore rehearsal was not rerun. |
+| Independent code/security and architecture reviews | Both found no actionable defect in the requested corrections. |
+
+### Boundary and remaining verification
+
+No commit, staging, push, live deployment, private-variable edit, real Telegram send or paid provider call was performed. Local API/frontend/PostgreSQL/Redis remained healthy; local bot and worker remained stopped. The cloud retains its pre-fix code/settings until a separately authorized release. The dashboard is unchanged, so no new Arc visual test or frontend test/build is claimed in this correction.
+
+Reproduce locally with the targeted PostgreSQL command above, the complete backend runner, and the two packaging tests. No real recording is needed. Before a future approved release, review positive limit settings, coordinate native autodeploys, deploy the quota-aware bot before the new API can emit terminal quota responses, and apply the controlled index migration once. Verify the deployed behavior separately; a passing disposable test database is not a claim of live activation. Do not restart the local poller with the cloud token. Work stopped after these two local fixes, as requested.
+
+## Security fixes — authorized release (2026-09-30)
+
+The owner subsequently requested “ok commit push and deploy”, superseding the local-only boundary above. Scope remains fixes 1 and 2; no additional product feature, provider test, resource purchase or unrelated review correction is included.
+
+- Reviewed live Railway configuration and verified API/worker watch patterns exclude `bot/**` and `tests/**`; bot still has no native source connection. No pending Railway configuration changes were present. Split release commits preserve bot-first compatibility without disconnecting native API/worker deployments.
+- Exact-index scans compare all staged source blobs against known local/cloud credentials in memory, key patterns, publication paths and regular UTF-8 file requirements. The first scan covered 155 files with zero local-secret/private-path/symlink matches and only 13 reviewed fixture/placeholder URL matches.
+- Bot-only commit `9dcc8d6` was pushed first. API/worker native events were observed SKIPPED. Serialized [bot workflow 36767078482](https://github.com/Neytrib/omni-task/actions/runs/36767078482) passed for the exact commit; deployment `c2715005-2914-4b7c-b9df-5ded8f926a35` reached SUCCESS after previous deployment `f211fc74-f33b-4e60-95da-0fae8f7bd722` was REMOVED. [Pages workflow 36767078494](https://github.com/Neytrib/omni-task/actions/runs/36767078494) also passed.
+- Packaging commit `4a5c2ba` is separately reviewable. API limits use the tested positive defaults (10/50 daily, 2/10 pending); live API configuration has no overrides for these four variables. Existing paid-provider settings are preserved. Remaining migration and deployment results will be recorded after verification.

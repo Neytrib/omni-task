@@ -287,6 +287,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             body.file_id,
             settings.bot_identity,
             body.message_id,
+            settings=settings,
             ack_message_id=body.acknowledgement_message_id,
             duration_seconds=body.duration_seconds,
             file_size=body.file_size,

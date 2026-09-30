@@ -4,13 +4,14 @@ import base64
 import hashlib
 import hmac
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, tuple_
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.config import Settings
 from app.errors import AppError
 from app.models import Notification, OutboxEvent, ProcessingRequest, SourceReceipt, Task, User
 
@@ -165,11 +166,15 @@ def create_processing_request(
     bot_identity: str,
     message_id: int,
     *,
+    settings: Settings,
     ack_message_id: int | None = None,
     duration_seconds: int,
     file_size: int | None = None,
     provider_name: str = "fake",
 ) -> tuple[ProcessingRequest, bool]:
+    # All intake replicas serialize count/check/insert until commit or rollback.
+    # Always acquire this before the owner lock; distinct from the migration lock.
+    db.execute(select(func.pg_advisory_xact_lock(739142811)))
     user = lock_user(db, owner_id)
     receipt, created = receipt_for(
         db,
@@ -190,6 +195,7 @@ def create_processing_request(
         if result is None:
             raise AppError(409, "source_conflict", "This source identity is already used.")
         return result, False
+    now = check_voice_admission(db, owner_id, settings)
     result = ProcessingRequest(
         owner_id=user.id,
         source_receipt_id=receipt.id,
@@ -198,10 +204,42 @@ def create_processing_request(
         duration_seconds=duration_seconds,
         file_size=file_size,
         provider_name=provider_name,
+        # PostgreSQL now() is transaction-start time, potentially before the lock wait.
+        created_at=now,
     )
     db.add(result)
     db.flush()
     return result, True
+
+
+def check_voice_admission(db: Session, owner_id: UUID, settings: Settings) -> datetime:
+    """Caller holds the intake/owner locks and rolls back rejected new receipts."""
+    now = db.scalar(select(func.clock_timestamp()))
+    pending = ProcessingRequest.state.in_(("queued", "processing"))
+    recent = ProcessingRequest.created_at > now - timedelta(hours=24)
+    owned = ProcessingRequest.owner_id == owner_id
+    global_pending, user_pending, global_daily, user_daily = db.execute(
+        select(
+            func.count().filter(pending),
+            func.count().filter(pending & owned),
+            func.count().filter(recent),
+            func.count().filter(recent & owned),
+        ).where(pending | recent)
+    ).one()
+    # Completed, failed and deleted sources still consume their daily admission.
+    # Existing-source replays return before here; worker recovery never calls here.
+    checks = (
+        (user_pending, settings.voice_user_pending_limit, "voice_user_busy"),
+        (global_pending, settings.voice_global_pending_limit, "voice_service_busy"),
+        (user_daily, settings.voice_user_daily_limit, "voice_user_quota"),
+        (global_daily, settings.voice_global_daily_limit, "voice_service_quota"),
+    )
+    for count, limit, code in checks:
+        if count >= limit:
+            raise AppError(
+                429, code, "Voice intake is temporarily limited. No task was queued. Try later."
+            )
+    return now
 
 
 def change_status(db: Session, owner_id: UUID, task_id: UUID, status: str, version: int) -> Task:

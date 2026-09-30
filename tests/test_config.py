@@ -34,6 +34,21 @@ def test_production_accepts_https_secure_cookie():
     assert settings.cookie_secure
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "voice_user_daily_limit",
+        "voice_global_daily_limit",
+        "voice_user_pending_limit",
+        "voice_global_pending_limit",
+    ],
+)
+@pytest.mark.parametrize("value", [0, -1, 100_001])
+def test_voice_admission_limits_cannot_be_unlimited(field, value):
+    with pytest.raises(ValidationError):
+        configuration(**{field: value})
+
+
 def test_insecure_development_cookie_requires_loopback():
     with pytest.raises(ValidationError):
         configuration(

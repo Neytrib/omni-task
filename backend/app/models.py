@@ -110,6 +110,7 @@ class ProcessingRequest(Base):
         ),
         CheckConstraint("ack_message_id IS NULL OR ack_message_id > 0", name="ck_processing_ack"),
         Index("ix_processing_due", "state", "next_attempt_at", "last_dispatched_at"),
+        Index("ix_processing_created", "created_at"),
     )
     id: Mapped[UUID] = mapped_column(PGUUID, primary_key=True, default=uuid4)
     owner_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)

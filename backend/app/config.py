@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     live_dispatch_interval_seconds: float = Field(default=0.25, ge=0.05, le=5)
     voice_max_duration_seconds: int = Field(default=600, ge=1, le=600)
     voice_max_bytes: int = Field(default=19_000_000, ge=1, le=19_000_000)
+    # Durable rolling-24-hour admission and all-age outstanding-work limits.
+    voice_user_daily_limit: int = Field(default=10, ge=1, le=10_000)
+    voice_global_daily_limit: int = Field(default=50, ge=1, le=100_000)
+    voice_user_pending_limit: int = Field(default=2, ge=1, le=1_000)
+    voice_global_pending_limit: int = Field(default=10, ge=1, le=10_000)
     voice_download_timeout_seconds: float = Field(default=30, gt=0, le=30)
     voice_conversion_timeout_seconds: float = Field(default=30, gt=0, le=30)
     voice_provider_timeout_seconds: float = Field(default=90, gt=0, le=90)

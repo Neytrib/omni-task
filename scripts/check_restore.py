@@ -37,10 +37,12 @@ with factory.begin() as db:
     deleted, _ = services.create_task(db, user.id, "Deleted synthetic content", "telegram_text",
         bot_identity=settings.bot_identity, message_id=102)
     services.delete_task(db, user.id, deleted.id, deleted.version)
+with factory.begin() as db:
+    # Voice admission takes its global lock before taking an owner lock.
     for message in (103, 104):
         request, _ = services.create_processing_request(db, user.id, "synthetic-restore-audio",
             settings.bot_identity, message, duration_seconds=1, file_size=None,
-            ack_message_id=message + 100, provider_name="fake")
+            ack_message_id=message + 100, provider_name="fake", settings=settings)
         if message == 103:
             queued = str(request.id)
         else:

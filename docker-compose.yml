@@ -71,6 +71,12 @@ services:
 
   api:
     <<: *backend
+    environment:
+      <<: *backend-environment
+      VOICE_USER_DAILY_LIMIT: ${VOICE_USER_DAILY_LIMIT:-10}
+      VOICE_GLOBAL_DAILY_LIMIT: ${VOICE_GLOBAL_DAILY_LIMIT:-50}
+      VOICE_USER_PENDING_LIMIT: ${VOICE_USER_PENDING_LIMIT:-2}
+      VOICE_GLOBAL_PENDING_LIMIT: ${VOICE_GLOBAL_PENDING_LIMIT:-10}
     depends_on:
       migrate:
         condition: service_completed_successfully

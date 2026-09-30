@@ -44,7 +44,16 @@ export default defineRailway(() => {
     healthcheckTimeout: 180,
     replicas: 1,
     deploy: deployment,
-    env: { ...backendEnvironment, PORT: "8000", ALLOW_PAID_TRANSCRIPTION: preserve() },
+    env: {
+      ...backendEnvironment,
+      PORT: "8000",
+      ALLOW_PAID_TRANSCRIPTION: preserve(),
+      // API defaults apply when absent; preserve any operator-set positive limits.
+      VOICE_USER_DAILY_LIMIT: preserve(),
+      VOICE_GLOBAL_DAILY_LIMIT: preserve(),
+      VOICE_USER_PENDING_LIMIT: preserve(),
+      VOICE_GLOBAL_PENDING_LIMIT: preserve(),
+    },
   });
 
   // Intentionally no GitHub source. A serialized GitHub Actions workflow stops
