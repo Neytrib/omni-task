@@ -30,6 +30,10 @@ class DeploymentError(Exception):
     """Only fixed operational text or validated IDs/statuses may be exposed."""
 
 
+class CommandError(DeploymentError):
+    """A command failed; only read-only calls may be retried."""
+
+
 def uuid_value(value: object) -> str:
     try:
         if not isinstance(value, str) or str(UUID(value)) != value:
@@ -68,17 +72,25 @@ def configured(environment: dict[str, str], *, check_only: bool = False) -> bool
 def command(args: list[str], *, timeout: int = 45) -> str:
     # Never stream CLI output: errors and build output can contain secret-bearing
     # URLs or runtime data. A failed upload has an unknown outcome; never retry it.
+    phase = {
+        ("railway", "deployment", "list"): "Railway deployment status read",
+        ("railway", "down", "--yes"): "Railway stop request",
+        ("railway", "up", "--ci"): "Railway upload request",
+        ("git", "rev-parse", "HEAD"): "Git checkout verification",
+        ("git", "status", "--porcelain"): "Git worktree verification",
+    }.get(tuple(args[:3]), "Command")
     try:
         result = subprocess.run(
             args, cwd=ROOT, capture_output=True, text=True, timeout=timeout, check=False
         )
     except (OSError, subprocess.TimeoutExpired):
-        raise DeploymentError(
-            "Command unavailable or timed out. Deployment outcome is unknown; inspect Railway."
+        raise CommandError(
+            f"{phase} unavailable or timed out. Deployment outcome is unknown; inspect Railway."
         ) from None
     if result.returncode:
-        raise DeploymentError(
-            "Deployment command failed. The bot may be stopped; inspect Railway before retrying."
+        raise CommandError(
+            f"{phase} failed (exit {result.returncode}). "
+            "The bot may be stopped; inspect Railway before retrying."
         )
     return result.stdout
 
@@ -124,7 +136,16 @@ class BotDeployer:
         return command(["railway", *args, *self.scope], timeout=timeout)
 
     def deployments(self) -> dict[str, str]:
-        rows = decode(self.railway("deployment", "list", "--json", "--limit", str(LIST_LIMIT)))
+        for attempt in range(3):
+            try:
+                raw = self.railway("deployment", "list", "--json", "--limit", str(LIST_LIMIT))
+                break
+            except CommandError:
+                if attempt == 2:
+                    raise
+                print(f"Retrying Railway deployment status read ({attempt + 2}/3).", flush=True)
+                time.sleep((1, 3)[attempt])
+        rows = decode(raw)
         if not isinstance(rows, list) or len(rows) >= LIST_LIMIT:
             raise DeploymentError("Deployment history is invalid or incomplete; inspect Railway.")
         result = {}
@@ -187,6 +208,7 @@ class BotDeployer:
         new_id = uuid_value(uploaded.get("deploymentId"))
         if new_id in before:
             raise DeploymentError("Upload did not identify a new deployment. Inspect Railway.")
+        print(f"Uploaded bot deployment {new_id}; waiting for its verified result.", flush=True)
         deadline = time.monotonic() + 900
         while time.monotonic() < deadline:
             current = self.deployments()

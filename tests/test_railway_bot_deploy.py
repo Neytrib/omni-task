@@ -63,7 +63,7 @@ def cli(monkeypatch):
         )
 
     def sleep(seconds):
-        assert seconds == 5
+        assert seconds in {1, 3, 5}
         clock[0] += seconds
 
     monkeypatch.setattr(deploy.subprocess, "run", run)
@@ -103,6 +103,45 @@ def test_initial_deployment_rechecks_empty_service_without_down(cli, configurati
     cli.listing(**{NEW: "SUCCESS"})
     assert deploy.BotDeployer(configuration).deploy(SHA) == NEW
     assert not any("down" in call for call in cli.calls)
+
+
+def test_read_failure_after_upload_retries_only_status_and_preserves_id(cli, configuration, capsys):
+    cli.listing()
+    cli.listing()
+    cli.responses.append((["up"], json.dumps({"deploymentId": NEW})))
+    cli.responses.append((["deployment", "list"], (1, "synthetic private CLI details")))
+    cli.listing(**{NEW: "SUCCESS"})
+    assert deploy.BotDeployer(configuration).deploy(SHA) == NEW
+    assert sum(call[1] == "up" for call in cli.calls) == 1
+    output = capsys.readouterr().out
+    assert f"Uploaded bot deployment {NEW}" in output
+    assert "Retrying Railway deployment status read (2/3)" in output
+    assert "private CLI" not in output
+
+
+def test_status_failure_retries_are_bounded_with_safe_phase_message(cli, configuration, capsys):
+    for _ in range(3):
+        cli.responses.append((["deployment", "list"], (1, "synthetic credential-bearing output")))
+    with pytest.raises(deploy.CommandError, match="deployment status read failed \\(exit 1\\)"):
+        deploy.BotDeployer(configuration).deploy(SHA)
+    assert len(cli.calls) == 3
+    assert "credential-bearing" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("operation", ["down", "up"])
+def test_mutation_failure_is_not_retried_and_identifies_phase(cli, configuration, operation):
+    if operation == "down":
+        cli.listing(**{OLD: "SUCCESS"})
+        cli.responses.append((["down", "--yes"], (1, "synthetic secret response")))
+        phase = "stop"
+    else:
+        cli.listing()
+        cli.listing()
+        cli.responses.append((["up", "--ci"], (1, "synthetic secret response")))
+        phase = "upload"
+    with pytest.raises(deploy.CommandError, match=f"Railway {phase} request failed"):
+        deploy.BotDeployer(configuration).deploy(SHA)
+    assert sum(call[1] == operation for call in cli.calls) == 1
 
 
 @pytest.mark.parametrize(
