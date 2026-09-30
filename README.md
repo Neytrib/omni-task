@@ -6,7 +6,7 @@ The assessment requirements and additional product choices are separated in [SPE
 
 Submission reading order: [requirements and test checklist](docs/REQUIREMENTS.md), [plain-English interview walkthrough](docs/ARCHITECTURE_WALKTHROUGH.md), and [three-minute demonstration](docs/DEMO.md). Operations: [Ubuntu VPS deployment/update/rollback runbook](docs/DEPLOYMENT.md) and [backup/restore procedure](docs/BACKUP_RESTORE.md). Production preparation adds an HTTPS edge; it does not authorize public deployment.
 
-The approved source repository is [Neytrib/omni-task](https://github.com/Neytrib/omni-task). The selected [Railway, GitHub Pages, Neon and Upstash hosting plan](docs/HOSTING_PLAN.md) still requires hosting-specific implementation; the cloud application is not deployed. Local Compose and the existing Ubuntu runbook remain available.
+The public source repository is [Neytrib/omni-task](https://github.com/Neytrib/omni-task). The selected [Railway, GitHub Pages, Neon and Upstash hosting plan](docs/HOSTING_PLAN.md) still requires hosting-specific implementation; the cloud application is not deployed. Local Compose and the existing Ubuntu runbook remain available.
 
 ## Local setup
 

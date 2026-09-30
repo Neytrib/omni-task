@@ -1,6 +1,6 @@
 # One-repository hosting plan
 
-Status: the owner approved `Neytrib/omni-task` as the one public source repository on 2026-09-30. Source publication is authorized after the staged-content safety check. Cloud configuration and deployment remain future work. The existing local Compose application and tested Ubuntu preparation remain intact.
+Status: [Neytrib/omni-task](https://github.com/Neytrib/omni-task) is public, with the reviewed source pushed to `main` on 2026-09-30 after owner approval and exact staged-content checks. Cloud configuration and deployment remain future work. The existing local Compose application and tested Ubuntu preparation remain intact.
 
 ## Source and hosting
 
@@ -45,7 +45,7 @@ Public build variables may contain only the Pages base and API/WSS addresses. Te
 
 ## Publication sequence and safety gate
 
-The owner resolved the preflight pause by approving `Neytrib/omni-task`. The source-publication sequence is:
+The owner resolved the preflight pause by approving `Neytrib/omni-task`. Steps 1–3 are complete; step 4 is future work. The publication procedure remains:
 
 1. Reinspect the current tree and credential/confidential-file scan; initialize the project on `main`.
 2. Stage only the reviewed source list. Inspect the complete staged file list and content, including placeholders and lockfiles. Re-run the known-secret/pattern checks against the exact staged bytes; force-adding private files is prohibited. Configure an appropriate Git author identity without exposing a private email inadvertently.

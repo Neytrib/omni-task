@@ -571,6 +571,42 @@ The ignore semantics were checked against official Git documentation; hosting re
 
 Ask the owner to approve **`Neytrib/omni-task` as the one public repository name** (or provide another name), then wait. Authenticated tooling is available, so no manual Git command or GitHub UI setup is needed now. After the owner continues, inspect the current files again, initialize `main`, stage the reviewed set, rescan exact staged bytes, commit, create the approved public repository, verify `origin`, and push. Do not infer that this preflight also approves paid resource creation or independently paid transcription tests.
 
+## Public GitHub repository publication — 2026-09-30
+
+Status: **Complete.** The owner approved the name and continuation. The one public source repository is [Neytrib/omni-task](https://github.com/Neytrib/omni-task), with `main` as the default branch and local `origin` set to its HTTPS Git URL. The initial source commit is `6770a24da0e5b09ffcec4dd64c79d08294100f7e`. Cloud application deployment remains a separate next step.
+
+### Changes and verified safety gate
+
+- Re-read project instructions and inspected current source/authentication state. The account was still authenticated, the approved repository did not yet exist, and the project had no Git history at entry.
+- Repeated the 130-file pre-initialization scan, initialized `main`, and staged only the explicit reviewed manifest using literal NUL-separated paths. No wildcard staging, force-add, private artifact, generated archive or source document was included.
+- Configured this repository's author/committer with the public account name and GitHub ID-based no-reply email. Global Git identity remained unchanged. No custom or active local Git hooks were present.
+- Inspected exact index blobs, file modes and content rather than only working-tree files. Root and independent reviews found zero real credential matches and no private paths, binaries or symlinks. Four active local credential values were compared in memory. Five URL matches in the root scanner (six detections with the independent scanner's patterns) were reviewed placeholders/synthetic security-test fixtures. Both root environment examples contain placeholders or empty credentials. All 562 lockfile URLs passed the independent embedded-credential/query check.
+- The reviewed 130-file index contained 1,297,989 bytes before the publication-evidence update. Its `git ls-files --stage -z` SHA-256 was `b62e2eddbf9a1d782bfc757866b718d614f188d5f0472811cb1756af4538e861`; it was unchanged immediately before the initial commit. No credential value was printed or sent to an external scanner.
+- Created the approved public repository, verified the exact `origin` push destination and visibility, scanned again immediately before the first push, and pushed only `main`. GitHub's first remote tree exactly matched the 130 reviewed local source paths and initial commit. `.env`, data, temporary logs and generated archives remain local and ignored.
+- README now provides an actual clone-based setup. Scope/hosting documents record source publication separately from an eventual public application. No application logic, running service, local credential, database or user data changed.
+
+### Commands and results
+
+| Executed check/action | Observed result |
+| --- | --- |
+| `gh auth status --active --json hosts`, `gh api user`, target repository read | Authenticated owner confirmed using filtered metadata; target was absent before creation. No tokens printed. |
+| `python3 tmp/public_preflight.py` | Passed for 130 candidate files before initialization, with no active-secret match. Local output remains ignored. |
+| `.venv/bin/pytest -q tests/test_publication_boundaries.py tests/test_submission.py` | **12 passed**, 0.06s, exit 0; one existing Starlette/httpx deprecation warning. No external integration call. |
+| `git init -b main`, local identity configuration, explicit-manifest `git add --pathspec-from-file=- --pathspec-file-nul` | Passed. Only reviewed source staged; private no-reply commit identity verified. |
+| `git diff --cached --check`, `git check-ignore` on `.env`/dump/audit/archive paths, `python3 tmp/staged_publication_audit.py` | Passed; exact index checked both before commit and before first push. Independent exact-index audit also passed. |
+| `git commit --quiet -m "feat: initialize Omni Task application"` | Created initial commit `6770a24`; clean working tree afterward. |
+| `gh repo create Neytrib/omni-task --public --source=. --remote=origin --description "Private Telegram task manager with voice transcription and a live Kanban dashboard."` | Created exactly the approved public repository; no automatic README/license/second repository or deployment. |
+| `GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push -u origin main` | Succeeded; local `main` tracks `origin/main`. Existing GitHub authentication was passed through the credential protocol, not embedded in the URL. |
+| `git ls-remote origin refs/heads/main` and GitHub repository/tree API reads | Verified identical initial local/remote commit, public visibility, default branch `main`, and all 130 reviewed source files with no private artifact. |
+
+The full application suite was not rerun: application code is unchanged and prior stage results remain historical evidence. The root safety helper/manifest are ignored local audit tools; publication-boundary regression tests are included in source. The final documentation-only evidence update is separately reviewed, scanned, committed and pushed through the same safety gate.
+
+### Remaining work and manual verification
+
+Open `https://github.com/Neytrib/omni-task` and verify the public badge, `main`, README, all service source directories and placeholder environment examples. Local `git status --short --branch` should show a clean tracked branch. Actual `.env`, confidential PDFs, recordings, logs and dumps must never be added later, including with force-add.
+
+GitHub Actions/Pages configuration, Railway production builds/private routing, cross-site authentication, Neon/Upstash connections and a managed-hosting acceptance test are not yet implemented or deployed. No second repository, Cloudflare Pages, paid resource, independent OpenAI call or new polling process was created. Work stops after source publication.
+
 ## Evidence template for each implementation stage
 
 - Requested stage and date:
