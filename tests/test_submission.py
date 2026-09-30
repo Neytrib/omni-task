@@ -61,6 +61,73 @@ def test_submission_omits_runtime_data_hidden_files_recordings_and_external_syml
         package(root, output)
 
 
+def test_archive_excludes_private_filename_variants_without_git(tmp_path):
+    root = source_tree(tmp_path / "source")
+    public = {
+        ".env.example",
+        "production.env.example",
+        "deploy/railway/api.env.example",
+        "deploy/railway/bot.env.example",
+        "deploy/railway/worker.env.example",
+        "backend/app/config.py",
+        "backend/alembic/script.py.mako",
+        "frontend/src/vite-env.d.ts",
+        "frontend/public/font-licenses.txt",
+        "docs/HOSTING_PLAN.md",
+        ".github/workflows/railway-bot.yml",
+        ".railway/railway.ts",
+    }
+    private = {
+        "backend/credentials.json",
+        "backend/credentials.production.json",
+        "frontend/service-account-production.json",
+        "deploy/prod.env.json",
+        "backend/settings.env.py",
+        "frontend/settings.env.tsx",
+        "deploy/railway/api.env.example.json",
+        "backend/production.env.example",
+        "frontend/credentials.json.ts",
+        "frontend/service-account-production.json.txt",
+        "backend/CREDENTIALS.prod.json",
+        "backend/settings.ENV.json",
+        "docs/worker.log.json",
+        "docs/worker.LOG.1.txt",
+        "docs/database.sql.txt",
+        "docs/database.dump.json",
+        "docs/settings.json.bak.txt",
+        "docs/settings.backup.json",
+        "docs/submission.tar.gz.txt",
+        "docs/signing.pem.txt",
+        "docs/recording.wav.json",
+        "docs/assessment.pdf.txt",
+        "backend/private/settings.json",
+        "backend/PRIVATE/settings.json",
+        "docs/backups/manifest.json",
+        "frontend/htmlcov/index.html",
+        "backend/export/credentials.json/config.ts",
+        "docs/worker.log/transcript.txt",
+        "deploy/project.env.production/config.json",
+    }
+    marker = b"synthetic private material with no recognizable key pattern"
+    for name in public | private:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(marker if name in private else b"Synthetic public source\n")
+    assert not (root / ".git").exists()
+
+    output = tmp_path / "submission.tar.gz"
+    count, _ = package(root, output)
+    with tarfile.open(output) as archive:
+        names = {member.name.removeprefix("omni-task/") for member in archive.getmembers()}
+        assert public <= names
+        assert not private & names
+        assert not any(marker in archive.extractfile(member).read() for member in archive)
+        manifest = archive.extractfile("omni-task/MANIFEST.sha256").read().decode()
+        manifested = {row.split("  ")[1] for row in manifest.splitlines()}
+        assert manifested == names - {"MANIFEST.sha256"}
+        assert count == len(manifested) == len(public) + 6
+
+
 def test_submission_rejects_known_credentials_and_source_symlinks(tmp_path):
     root = source_tree(tmp_path)
     secret = "synthetic-secret-value-never-to-submit"

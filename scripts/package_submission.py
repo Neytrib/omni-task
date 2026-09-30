@@ -62,10 +62,26 @@ EXCLUDED = {
     ".pytest_cache",
     ".ruff_cache",
     "coverage",
+    "htmlcov",
     ".vitest",
     "assessment-private",
 }
 SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".css", ".html", ".json", ".md", ".txt", ".conf", ".mako"}
+ENV_TEMPLATES = {
+    ".env.example",
+    "production.env.example",
+    "deploy/railway/api.env.example",
+    "deploy/railway/bot.env.example",
+    "deploy/railway/worker.env.example",
+}
+# Apply this before the source allowlist, including in extracted trees without Git.
+# Check every suffix so adding .json/.txt to a private filename cannot publish it.
+PRIVATE_SUFFIXES = frozenset(
+    ".env .pem .key .p12 .pfx .jks .keystore .pdf .doc .docx .odt .rtf "
+    ".ogg .opus .wav .mp3 .m4a .webm .oga .flac .aac .mp4 .mov "
+    ".log .dump .backup .sql .db .sqlite .sqlite3 .rdb .aof "
+    ".zip .tar .tgz .gz .7z .bak .orig .swp .swo".split()
+)
 SECRET_NAMES = {
     "POSTGRES_PASSWORD",
     "BOT_API_KEY",
@@ -101,6 +117,27 @@ def local_secrets(root: Path) -> set[bytes]:
     return values
 
 
+def private_source(member: Path) -> bool:
+    if member.as_posix() in ENV_TEMPLATES:
+        return False
+    for part in member.parts:
+        name = part.casefold()
+        suffixes = set(Path(name).suffixes)
+        if (
+            name in EXCLUDED
+            or name.startswith(".env")
+            or bool(suffixes & PRIVATE_SUFFIXES)
+            or name.endswith("~")
+            or "ai_engineering_intern_technical_task" in name
+            or (
+                ".json" in suffixes
+                and (name.startswith("credentials.") or name.startswith("service-account"))
+            )
+        ):
+            return True
+    return False
+
+
 def collect_sources(root: Path) -> dict[str, bytes]:
     result = {}
     secrets = local_secrets(root)
@@ -109,7 +146,7 @@ def collect_sources(root: Path) -> dict[str, bytes]:
         dirs[:] = sorted(
             name
             for name in dirs
-            if name not in EXCLUDED
+            if not private_source(relative / name)
             and (
                 not name.startswith(".") or (not relative.parts and name in {".railway", ".github"})
             )
@@ -121,6 +158,8 @@ def collect_sources(root: Path) -> dict[str, bytes]:
         for name in sorted(files):
             path = Path(directory) / name
             member = path.relative_to(root)
+            if private_source(member):
+                continue
             if member.as_posix() in EXACT_SOURCES:
                 allowed = True
             elif member.parent.parts == (".github", "workflows"):

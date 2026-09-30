@@ -4,6 +4,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from scripts.package_submission import collect_sources
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -43,6 +45,13 @@ def test_git_ignores_private_files_but_keeps_complete_source(tmp_path):
         "deploy/railway/secret.env.example",
         "credentials.json",
         "service-account-prod.json",
+        "backend/credentials.json",
+        "frontend/credentials.production.json",
+        "frontend/service-account-production.json",
+        "deploy/prod.env.json",
+        "backend/settings.env.py",
+        "docs/worker.log.json",
+        "docs/database.sql.txt",
         ".netrc",
         ".pgpass",
         ".npmrc",
@@ -90,6 +99,7 @@ def test_git_ignores_private_files_but_keeps_complete_source(tmp_path):
         "frontend/src/App.tsx",
         "frontend/package-lock.json",
         "uv.lock",
+        "pyproject.toml",
         ".github/workflows/pages.yml",
         "deploy/railway/api.env.example",
         "deploy/railway/bot.env.example",
@@ -124,3 +134,6 @@ def test_git_ignores_private_files_but_keeps_complete_source(tmp_path):
     ignored = set(result.stdout.decode().strip("\0").split("\0"))
     assert set(private) <= ignored
     assert not set(public) & ignored
+    sources = collect_sources(tmp_path)
+    assert not set(private) & sources.keys()
+    assert set(public) <= sources.keys()
