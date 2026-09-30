@@ -20,6 +20,13 @@ ordinary application pushes use API/worker GitHub autodeploys and the serialized
 bot deployment workflow. Do not connect the bot to native GitHub autodeploys: that
 would race the stop-before-start workflow and can start two polling processes.
 
+After the first apply, explicitly connect the API and worker GitHub sources with
+`railway service source connect` as documented in `docs/HOSTING_PLAN.md`, then
+verify their deployment triggers. A repository/branch in the IaC or service
+configuration alone is not evidence that a push will deploy. The Railway account
+must be linked to the owning GitHub identity as well as have the Railway GitHub
+app installed for this repository. Leave the bot disconnected.
+
 Railway's old `railway.json`/`railway.toml` format is not used: new services cannot
 opt into it and legacy support ends on 2026-12-01. The current TypeScript SDK is
 pinned separately from the frontend and never enters the browser bundle.
