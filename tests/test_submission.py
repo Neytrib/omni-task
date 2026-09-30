@@ -118,12 +118,18 @@ def test_submission_includes_only_explicit_hosted_configs_and_workflows(tmp_path
     assert not private & sources.keys()
 
 
-def test_submission_detects_credentials_from_private_hosted_configuration(tmp_path):
+@pytest.mark.parametrize(
+    "file_name,variable",
+    [("api.env", "REDIS_URL"), ("deploy.env", "RAILWAY_TOKEN")],
+)
+def test_submission_detects_credentials_from_private_hosted_configuration(
+    tmp_path, file_name, variable
+):
     root = source_tree(tmp_path)
-    credentials = root / "private/railway/api.env"
+    credentials = root / "private/railway" / file_name
     credentials.parent.mkdir(parents=True)
     secret = "rediss://default:synthetic-private-value@redis.example.invalid:6379/0"
-    credentials.write_text("REDIS_URL=" + secret)
+    credentials.write_text(variable + "=" + secret)
     (root / "frontend/src/leak.ts").write_text(secret)
     with pytest.raises(ValueError, match="Potential credential"):
         collect_sources(root)

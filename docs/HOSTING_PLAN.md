@@ -1,13 +1,13 @@
 # One-repository managed hosting
 
-Status on 2026-09-30: reviewed source is public at [Neytrib/omni-task](https://github.com/Neytrib/omni-task). Hosting code, frontend transport and service templates are implemented. **The managed application is not deployed or accepted yet.** The owner upgraded Railway to Hobby; the existing [Railway project](https://railway.com/project/06507807-7826-4081-beef-a493a2fd73e4) now contains empty `api`, `bot`, `worker` services in `production`. The API domain `https://api-production-08eb2.up.railway.app` is assigned, and GitHub Pages Actions hosting/public API configuration is enabled. These settings do not imply a running API. The owner's Neon free project exists in Ohio; its direct TLS connection was verified; Upstash setup, migrations and remaining variables are outstanding. [TASKS.md](../TASKS.md) records the latest observed state.
+Status on 2026-09-30: reviewed source is public at [Neytrib/omni-task](https://github.com/Neytrib/omni-task). Hosting code, frontend transport and service templates are implemented. **The Pages frontend is deployed; Railway service startup and end-to-end acceptance are in progress.** The owner upgraded Railway to Hobby; the existing [Railway project](https://railway.com/project/06507807-7826-4081-beef-a493a2fd73e4) contains `api`, `bot`, `worker` services in `production`. The API domain `https://api-production-08eb2.up.railway.app` is assigned, and GitHub Pages Actions hosting/public API configuration is enabled. The API/worker deployment was started after explicit migration; verify readiness before use. The owner's Neon free project exists in Ohio; its direct TLS connection and schema revision `0003_live_outbox` were verified. Upstash native TLS, Pub/Sub, transactions and Lua checks passed; its unique synthetic probe key was removed. [TASKS.md](../TASKS.md) records the latest observed state.
 
 ## Where each part runs
 
 | Destination | Deployment |
 | --- | --- |
 | One public GitHub repository | All reviewed application source, Dockerfiles, Compose, tests, documentation and Actions |
-| GitHub Pages | Only `frontend/dist`; intended URL `https://neytrib.github.io/omni-task/` |
+| GitHub Pages | Only `frontend/dist`; deployed URL `https://neytrib.github.io/omni-task/` |
 | Railway `api` | FastAPI HTTPS/WSS, private bot API and durable dispatch |
 | Railway `bot` | One polling process and its private voice/notification HTTP adapter |
 | Railway `worker` | Supervised transcription and separate notification/foundation consumers |
@@ -119,3 +119,5 @@ Current hosting checks report **452 backend tests**, **40 bot-deployment guard t
 ## Public-source boundary
 
 Only reviewed source, placeholder templates and normal documentation belong in Git. `.env`, `private/`, credentials, confidential PDFs/source documents, recordings, logs, backups and real database dumps remain excluded from Git, Docker contexts and submission archives. The bot workflow's Railway token belongs in a GitHub **secret**, never a public variable or frontend build. Check exact staged bytes before every push; ignore rules cannot protect already tracked or force-added files. The S9 archive remains an older immutable snapshot. The owner-approved Hobby subscription does not authorize further purchases or independent paid transcription tests.
+
+If CLI authentication cannot create a project token, create it in the existing Railway project’s Settings → Tokens for production. Place it only in the ignored `private/railway/deploy.env` field `RAILWAY_TOKEN=` for secure CLI transfer into the repository’s encrypted Actions secret. Never use an account-wide token in this workflow. Bot variable changes must use `--skip-deploys`, followed by the serialized workflow, so updating a variable cannot bypass stop-before-start.

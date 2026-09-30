@@ -87,7 +87,7 @@ def local_secrets(root: Path) -> set[bytes]:
     values = set()
     locations = [
         root / ".env",
-        *(root / "private/railway" / f"{name}.env" for name in ("api", "bot", "worker")),
+        *(root / "private/railway" / f"{name}.env" for name in ("api", "bot", "worker", "deploy")),
     ]
     for env in locations:
         if not env.is_file() or any(part.is_symlink() for part in (env, *env.parents)):

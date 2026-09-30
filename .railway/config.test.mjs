@@ -36,6 +36,7 @@ test("bot has no persistence/provider secrets and private URLs contain only refe
   assert.equal(services.bot.variables.TELEGRAM_BOT_TOKEN.type, "preserve");
   assert.equal(services.api.variables.DATABASE_URL.type, "preserve");
   assert.equal(services.api.variables.REDIS_URL.type, "preserve");
+  assert.equal(services.api.variables.ALLOW_PAID_TRANSCRIPTION.type, "preserve");
   assert.equal(services.worker.variables.OPENAI_API_KEY.type, "preserve");
   assert.equal(services.worker.variables.ALLOW_PAID_TRANSCRIPTION.type, "preserve");
   assert.equal(services.bot.variables.BOT_API_KEY.type, "reference");
