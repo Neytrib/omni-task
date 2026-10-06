@@ -1,5 +1,7 @@
 # Omni Task
 
+**Offline as of October 6, 2026:** the owner finished the assessment and requested shutdown. Railway deployments are stopped, GitHub Actions/autodeploys are disabled, and Pages is unpublished. Source and stored data are preserved. Deployment results below are historical; see [shutdown evidence and limitations](TASKS.md#assessment-shutdown--2026-10-06). Restart requires a new owner request.
+
 A private Telegram-linked task manager with long-polling text and voice capture, task navigation, status controls, confirmed deletion, and private dashboard login links. Task rules and persistence live in the HTTP API. The private dashboard provides a three-column Kanban board, task creation and full details, drag/status controls, confirmed deletion, and light/dark themes. Owner-scoped WebSockets synchronize changes from Telegram, workers, and other dashboard tabs; PostgreSQL snapshots recover missed updates.
 
 The assessment requirements and additional product choices are separated in [SPEC.md](SPEC.md). Stage evidence and limitations are in [TASKS.md](TASKS.md).
